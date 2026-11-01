@@ -94,6 +94,30 @@ The four selected features now use the original Flow application and library:
   without changing article text. The root, quiet route, manifest and service worker
   all returned HTTP 200 without authentication.
 
+## Android emulator Undo / Back verification
+
+The production fix in `43ace67` was verified with Alice on Android 16 (API 36),
+Chrome 133.0.6943.137, and the `S23Ultra_Test_API36` emulator. This is a Google
+Android emulator image at phone dimensions, not a Samsung One UI device.
+
+- Before the fix, Undo restored “Ugh!” in the quiet document, but Android Back
+  returned to an existing setup tab still showing the undone paragraph. Reopening
+  could start at that stale paragraph.
+- The fix reconciles saved listening plans by their increasing update revision,
+  including Undo to an older bookmark or Chapter beginning. It preserves local
+  chapter-range edits and unrelated radio choices. All seven reconciliation
+  regression groups passed, along with TypeScript, ESLint and the production build.
+- The emulator retest started at “Ugh!”, saved “Found what?”, and explicitly
+  brought the original setup tab forward to verify it had received that temporary
+  bookmark. No page was reloaded during the following Undo / Back / reopen loop.
+- Undo restored “Ugh!”. Android's edge-swipe Back closed the quiet tab and returned
+  to the original setup tab showing “Ugh!” and the unchanged chapter III–III range.
+  Reopening began with “Ugh!” as the first prose paragraph and selected bookmark;
+  the undone “Found what?” bookmark remained unselected. All three checks passed.
+- The deployed code is `43ace67`, Vercel deployment
+  `dpl_E6ieMgjPXDoXJCWvQcNdXinJHYnG`, at the existing production alias.
+  Screenshot evidence and the full local audit are in `.tmp/android-ux-audit/`.
+
 ## Native narration and device coverage
 
 The compact Bookmark change has not been retested with native Edge audio or
