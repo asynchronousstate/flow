@@ -38,3 +38,11 @@ yarn-error.log*
 **/public/workbox-*
 **/public/sw.*
 **/public/fallback-*
+
+# Local deployment identity, generated packages and playback evidence
+.tmp/
+.vercel/
+.openai/
+*.tsbuildinfo
+.vercel
+.env*

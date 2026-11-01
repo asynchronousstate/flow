@@ -10,6 +10,7 @@ import {
   MdToc,
   MdTimeline,
   MdOutlineLightMode,
+  MdHeadset,
 } from 'react-icons/md'
 import { RiFontSize, RiHome6Line, RiSettings5Line } from 'react-icons/ri'
 import { useRecoilState } from 'recoil'
@@ -32,6 +33,7 @@ import { SplitView, useSplitViewItem } from './base'
 import { Settings } from './pages'
 import { AnnotationView } from './viewlets/AnnotationView'
 import { ImageView } from './viewlets/ImageView'
+import { ListeningView } from './viewlets/ListeningView'
 import { SearchView } from './viewlets/SearchView'
 import { ThemeView } from './viewlets/ThemeView'
 import { TimelineView } from './viewlets/TimelineView'
@@ -47,7 +49,7 @@ export const Layout: React.FC = ({ children }) => {
 
   useEffect(() => {
     if (mobile === undefined) return
-    setAction(mobile ? undefined : 'toc')
+    setAction((current) => current ?? (mobile ? undefined : 'toc'))
     setReady(true)
   }, [mobile, setAction])
 
@@ -75,6 +77,13 @@ interface IViewAction extends IAction {
 }
 
 const viewActions: IViewAction[] = [
+  {
+    name: 'listening',
+    title: 'Listening',
+    Icon: MdHeadset,
+    View: ListeningView,
+    env: Env.Desktop | Env.Mobile,
+  },
   {
     name: 'toc',
     title: 'toc',
@@ -156,7 +165,7 @@ function ViewActionBar({ className, env }: EnvActionBarProps) {
           const active = action === name
           return (
             <Action
-              title={t(`${title}.title`)}
+              title={name === 'listening' ? title : t(`${title}.title`)}
               Icon={Icon}
               active={active}
               onClick={() => setAction(active ? undefined : name)}
@@ -288,10 +297,11 @@ const SideBar: React.FC = () => {
   const [action, setAction] = useAction()
   const mobile = useMobile()
   const t = useTranslation()
+  const listening = action === 'listening'
 
   const { size } = useSplitViewItem(SideBar, {
     preferredSize: 240,
-    minSize: 160,
+    minSize: listening ? 340 : 160,
     visible: !!action,
   })
 
@@ -301,16 +311,25 @@ const SideBar: React.FC = () => {
       <div
         className={clsx(
           'SideBar bg-surface flex flex-col',
+          listening && 'flow-listening-sidebar',
           !action && '!hidden',
           mobile ? 'absolute inset-y-0 right-0 z-10' : '',
         )}
-        style={{ width: mobile ? '75%' : size }}
+        style={{
+          width: mobile
+            ? listening
+              ? '100%'
+              : '75%'
+            : listening
+            ? Math.max(size ?? 340, 340)
+            : size,
+        }}
       >
         {viewActions.map(({ name, title, View }) => (
           <View
             key={name}
-            name={t(`${name}.title`)}
-            title={t(`${title}.title`)}
+            name={name === 'listening' ? title : t(`${name}.title`)}
+            title={name === 'listening' ? title : t(`${title}.title`)}
             className={clsx(name !== action && '!hidden')}
           />
         ))}

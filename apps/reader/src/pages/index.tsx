@@ -3,13 +3,14 @@ import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   MdCheckBox,
   MdCheckBoxOutlineBlank,
   MdCheckCircle,
   MdOutlineFileDownload,
   MdOutlineShare,
+  MdHeadset,
 } from 'react-icons/md'
 import { useSet } from 'react-use'
 import { usePrevious } from 'react-use'
@@ -21,11 +22,16 @@ import {
   useDisablePinchZooming,
   useLibrary,
   useMobile,
+  useSetAction,
   useRemoteBooks,
   useRemoteFiles,
   useTranslation,
 } from '../hooks'
-import { reader, useReaderSnapshot } from '../models'
+import {
+  loadLibraryListeningBook,
+  loadQuietLaunch,
+} from '../listening/integrated'
+import { BookTab, reader, useReaderSnapshot } from '../models'
 import { lock } from '../styles'
 import { dbx, pack, uploadData } from '../sync'
 import { copy } from '../utils'
@@ -37,10 +43,78 @@ const SOURCE = 'src'
 export default function Index() {
   const { focusedTab } = useReaderSnapshot()
   const router = useRouter()
+  const setAction = useSetAction()
+  const openedBook = useRef<string>()
+  const [openError, setOpenError] = useState('')
   const src = new URL(window.location.href).searchParams.get(SOURCE)
   const [loading, setLoading] = useState(!!src)
 
   useDisablePinchZooming()
+
+  useEffect(() => {
+    const bookId = router.query.book
+    if (!router.isReady || typeof bookId !== 'string') return
+    const sessionId = router.query.session
+    if (sessionId !== undefined && typeof sessionId !== 'string') {
+      setOpenError('This listening session link is incomplete.')
+      return
+    }
+    const requestKey = JSON.stringify([bookId, sessionId])
+    if (openedBook.current === requestKey) {
+      if (router.query.listening === '1') setAction('listening')
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setOpenError('')
+    Promise.all([
+      db?.books.get(bookId),
+      (sessionId !== undefined
+        ? loadQuietLaunch(bookId, sessionId)
+        : loadLibraryListeningBook(bookId)
+      ).catch((error: unknown) => {
+        const code = (error as { code?: string })?.code
+        if (code === 'BOOK_CHANGED' || code === 'SESSION_UNAVAILABLE')
+          return undefined
+        throw error
+      }),
+    ])
+      .then(([book, listening]) => {
+        if (cancelled) return
+        if (!book)
+          throw new Error('This book is no longer in your Flow library.')
+        // Only restore a locator verified against the current EPUB bytes.
+        // A changed book keeps its canonical reading position and opens recovery.
+        const returnCfi = listening?.record.returnCfi
+        const tab = reader.addTab({
+          ...book,
+          cfi: returnCfi ?? book.cfi,
+        })
+        if (tab instanceof BookTab && tab.rendered && returnCfi) {
+          tab.display(returnCfi, false)
+        }
+        openedBook.current = requestKey
+        if (!listening || router.query.listening === '1') setAction('listening')
+      })
+      .catch((error) => {
+        if (!cancelled)
+          setOpenError(
+            error instanceof Error ? error.message : 'Could not open book.',
+          )
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    router.isReady,
+    router.query.book,
+    router.query.listening,
+    router.query.session,
+    setAction,
+  ])
 
   useEffect(() => {
     let src = router.query[SOURCE]
@@ -90,6 +164,11 @@ export default function Index() {
         <title>{focusedTab?.title ?? 'Flow'}</title>
       </Head>
       <ReaderGridView />
+      {openError && (
+        <p className="flow-listening-route-error" role="alert">
+          {openError}
+        </p>
+      )}
       {loading || <Library />}
     </>
   )
@@ -281,6 +360,11 @@ const Library: React.FC = () => {
                     db?.books.bulkDelete(bookIds)
                     db?.covers.bulkDelete(bookIds)
                     db?.files.bulkDelete(bookIds)
+                    db?.listening.bulkDelete(bookIds)
+                    db?.listeningSessions
+                      .where('bookId')
+                      .anyOf(bookIds)
+                      .delete()
 
                     // folder data is not updated after `filesDeleteBatch`
                     mutateRemoteFiles(
@@ -313,7 +397,7 @@ const Library: React.FC = () => {
                 <Button className="relative">
                   <input
                     type="file"
-                    accept="application/epub+zip,application/epub,application/zip"
+                    accept=".epub,application/epub+zip,application/epub,application/zip"
                     className="absolute inset-0 cursor-pointer opacity-0"
                     onChange={(e) => {
                       const files = e.target.files
@@ -375,6 +459,8 @@ const Book: React.FC<BookProps> = ({
 
   const router = useRouter()
   const mobile = useMobile()
+  const setAction = useSetAction()
+  const [listenError, setListenError] = useState('')
 
   const cover = covers?.find((c) => c.id === book.id)?.cover
   const remoteFile = remoteFiles.data?.find((f) => f.name === book.name)
@@ -438,6 +524,29 @@ const Book: React.FC<BookProps> = ({
         />
         {book.name}
       </div>
+      {!select && (
+        <button
+          type="button"
+          className="flow-listening-cover-action"
+          disabled={loading}
+          aria-label={`Listen to ${book.metadata.title || book.name}`}
+          onClick={async () => {
+            setListenError('')
+            try {
+              if (mobile) await router.push('/_')
+              reader.addTab(book)
+              setAction('listening')
+            } catch (error) {
+              setListenError(
+                error instanceof Error ? error.message : 'Could not open book.',
+              )
+            }
+          }}
+        >
+          <MdHeadset aria-hidden="true" /> Listen
+        </button>
+      )}
+      {listenError && <p role="alert">{listenError}</p>}
     </div>
   )
 }

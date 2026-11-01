@@ -5,6 +5,10 @@ import { PackagingMetadataObject } from '@flow/epubjs/types/packaging'
 
 import { Annotation } from './annotation'
 import { fileToEpub } from './file'
+import type {
+  IntegratedListeningRecord,
+  QuietLaunchRecord,
+} from './listening/integrated'
 import { TypographyConfiguration } from './state'
 
 export interface FileRecord {
@@ -40,9 +44,14 @@ export class DB extends Dexie {
   files!: Table<FileRecord>
   covers!: Table<CoverRecord>
   books!: Table<BookRecord>
+  listening!: Table<IntegratedListeningRecord, string>
+  listeningSessions!: Table<QuietLaunchRecord, string>
 
   constructor(name: string) {
     super(name)
+
+    this.version(7).stores({ listeningSessions: 'id, bookId, createdAt' })
+    this.version(6).stores({ listening: 'bookId' })
 
     this.version(5).stores({
       books:
