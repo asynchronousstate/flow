@@ -27,6 +27,11 @@ export interface LoadedListeningBook {
   record: IntegratedListeningRecord
 }
 
+export interface LibraryBookmarkChange {
+  record: IntegratedListeningRecord
+  previous: IntegratedListeningRecord
+}
+
 export interface QuietLaunchRecord {
   id: string
   bookId: string
@@ -51,7 +56,7 @@ export class ListeningBookChangedError extends Error {
   readonly code = 'BOOK_CHANGED'
   constructor() {
     super(
-      'This EPUB has changed. Reset its listening setup and choose a new range and starting paragraph.',
+      'This EPUB has changed. Reset its listening setup and choose a new range and bookmark.',
     )
     this.name = 'ListeningBookChangedError'
   }
@@ -176,13 +181,59 @@ export async function loadQuietLaunch(
   return { book, record: launch.plan }
 }
 
-export async function updateListeningRecord(
+function copyListeningRecord(
+  record: IntegratedListeningRecord,
+): IntegratedListeningRecord {
+  return { ...record, marker: record.marker ? { ...record.marker } : undefined }
+}
+
+function sameListeningRecord(
+  left: IntegratedListeningRecord,
+  right: IntegratedListeningRecord,
+) {
+  const keys = [
+    'bookId',
+    'fingerprint',
+    'from',
+    'through',
+    'startAt',
+    'returnCfi',
+    'updatedAt',
+  ] as const
+  if (!keys.every((key) => left[key] === right[key])) return false
+  if (!left.marker || !right.marker) return left.marker === right.marker
+  const markerKeys = [
+    'sourceHref',
+    'blockId',
+    'text',
+    'savedAt',
+    'cfi',
+  ] as const
+  return markerKeys.every((key) => left.marker![key] === right.marker![key])
+}
+
+function validateListeningRange(
+  book: ListeningBook,
+  record: IntegratedListeningRecord,
+) {
+  if (
+    !book.sections.some((section) => section.sourceHref === record.from) ||
+    !book.sections.some((section) => section.sourceHref === record.through)
+  )
+    throw new Error('Choose chapters that are available in this book.')
+}
+
+async function changeListeningRecord(
   bookId: string,
   changes: Partial<
     Omit<IntegratedListeningRecord, 'bookId' | 'fingerprint' | 'updatedAt'>
   >,
   expectedFingerprint?: string,
-): Promise<IntegratedListeningRecord> {
+): Promise<LibraryBookmarkChange> {
+  const snapshot = {
+    ...changes,
+    ...(changes.marker ? { marker: { ...changes.marker } } : {}),
+  }
   const loaded = await loadLibraryListeningBook(bookId)
   if (expectedFingerprint && expectedFingerprint !== loaded.record.fingerprint)
     throw new ListeningBookChangedError()
@@ -194,19 +245,30 @@ export async function updateListeningRecord(
       throw new Error('The book changed. Reopen listening setup before saving.')
     const next: IntegratedListeningRecord = {
       ...current,
-      ...changes,
+      ...snapshot,
       bookId,
       fingerprint: loaded.record.fingerprint,
-      updatedAt: Date.now(),
+      // Strictly increasing revisions also distinguish writes in the same ms.
+      updatedAt: Math.max(Date.now(), current.updatedAt + 1),
     }
-    if (
-      !loaded.book.sections.some((s) => s.sourceHref === next.from) ||
-      !loaded.book.sections.some((s) => s.sourceHref === next.through)
-    )
-      throw new Error('Choose chapters that are available in this book.')
+    validateListeningRange(loaded.book, next)
     await db!.listening.put(next)
-    return next
+    return {
+      record: copyListeningRecord(next),
+      previous: copyListeningRecord(current),
+    }
   })
+}
+
+export async function updateListeningRecord(
+  bookId: string,
+  changes: Partial<
+    Omit<IntegratedListeningRecord, 'bookId' | 'fingerprint' | 'updatedAt'>
+  >,
+  expectedFingerprint?: string,
+): Promise<IntegratedListeningRecord> {
+  return (await changeListeningRecord(bookId, changes, expectedFingerprint))
+    .record
 }
 
 export async function saveLibraryMarker(
@@ -220,4 +282,56 @@ export async function saveLibraryMarker(
     { ...nextRange, marker, startAt: 'marker' },
     expectedFingerprint,
   )
+}
+
+/** Capture the previous plan in the same transaction as the bookmark save. */
+export async function saveLibraryBookmark(
+  bookId: string,
+  marker: ListeningMarker,
+  expectedFingerprint?: string,
+  nextRange?: { from: string; through: string },
+): Promise<LibraryBookmarkChange> {
+  return changeListeningRecord(
+    bookId,
+    { ...nextRange, marker, startAt: 'marker' },
+    expectedFingerprint,
+  )
+}
+
+/** Undo only our own latest save; another tab's newer plan always wins. */
+export async function undoLibraryBookmark(
+  bookId: string,
+  expected: IntegratedListeningRecord,
+  previous: IntegratedListeningRecord,
+): Promise<IntegratedListeningRecord> {
+  const saved = copyListeningRecord(expected)
+  const restore = copyListeningRecord(previous)
+  if (
+    saved.bookId !== bookId ||
+    restore.bookId !== bookId ||
+    saved.fingerprint !== restore.fingerprint
+  )
+    throw new ListeningBookChangedError()
+  // Unlike loading setup, Undo must never recreate a missing listening plan.
+  const loaded = await readCanonicalBook(bookId)
+  if (saved.fingerprint !== loaded.fingerprint)
+    throw new ListeningBookChangedError()
+  return db!.transaction('rw', db!.listening, db!.books, async () => {
+    if (!(await db!.books.get(bookId)))
+      throw new Error('This book was removed from your library.')
+    const current = await db!.listening.get(bookId)
+    if (current && current.fingerprint !== loaded.fingerprint)
+      throw new ListeningBookChangedError()
+    if (!current || !sameListeningRecord(current, saved))
+      throw new Error(
+        'The bookmark changed in another window. Your newer listening setup was kept. Review it before bookmarking again.',
+      )
+    const next = {
+      ...restore,
+      updatedAt: Math.max(Date.now(), current.updatedAt + 1),
+    }
+    validateListeningRange(loaded.book, next)
+    await db!.listening.put(next)
+    return copyListeningRecord(next)
+  })
 }

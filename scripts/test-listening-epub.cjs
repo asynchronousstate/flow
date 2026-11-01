@@ -5,8 +5,8 @@
  * tests at http://127.0.0.1:7141 without launching or controlling any browser.
  * `--write` refreshes that fixture without launching a browser or server.
  */
-/* global JSZip, prepareListeningBook, getListeningParagraphs, markerFromRange,
-  buildQuietSession, sameSourceHref */
+/* global JSZip, prepareListeningBook, getListeningParagraphs,
+  getBookmarkParagraphs, markerFromRange, buildQuietSession, sameSourceHref */
 const assert = require('node:assert/strict')
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
@@ -137,7 +137,7 @@ async function verify(aliceBase64) {
   )
   hostile.file(
     'b.xhtml',
-    '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>B</h1><p id="target" xml:lang="fr">Bonjour.</p><p id="cdata"><![CDATA[Keep <this> & this prose.]]></p><figure><img src="illustration.png" alt="Illo5"/><figcaption>Printed caption.</figcaption></figure></body></html>',
+    '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>B</h1><p id="target" xml:lang="fr">Bonjour.</p><p id="cdata"><![CDATA[Keep <this> & this prose.]]></p><h2>Subheading.</h2><p>Repeated bookmark prose.</p><figure><img src="illustration.png" alt="Illo5"/><figcaption><p>Printed caption.</p></figcaption></figure><table><tr><th>Column heading.</th><td><p>Table cell.</p></td></tr></table><pre>Code sample.</pre><p>Repeated bookmark prose.</p></body></html>',
   )
   const cleaned = await prepareListeningBook(
     await hostile.generateAsync({ type: 'arraybuffer' }),
@@ -211,6 +211,54 @@ async function verify(aliceBase64) {
       section.html.includes('listening-image-description'),
     ),
     'Quiet-session filtering mutated the source converter result',
+  )
+
+  const bookmarkSection = cleaned.sections[1]
+  const bookmarkSourceHtml = bookmarkSection.html
+  const allBookmarkParagraphs = getListeningParagraphs(bookmarkSection)
+  const bookmarkParagraphs = getBookmarkParagraphs(bookmarkSection)
+  check(
+    JSON.stringify(bookmarkParagraphs.map((paragraph) => paragraph.text)) ===
+      JSON.stringify([
+        'Bonjour.',
+        'Keep <this> & this prose.',
+        'Repeated bookmark prose.',
+        'Repeated bookmark prose.',
+      ]),
+    'Quick bookmarks included a heading, caption, table cell or preformatted block, or dropped prose',
+  )
+  const bookmarkDuplicates = bookmarkParagraphs.filter(
+    (paragraph) => paragraph.text === 'Repeated bookmark prose.',
+  )
+  const sourceBookmarkDuplicates = allBookmarkParagraphs.filter(
+    (paragraph) => paragraph.text === 'Repeated bookmark prose.',
+  )
+  check(
+    sourceBookmarkDuplicates.length === 2 &&
+      bookmarkDuplicates[0].blockId === sourceBookmarkDuplicates[0].blockId &&
+      bookmarkDuplicates[1].blockId === sourceBookmarkDuplicates[1].blockId &&
+      bookmarkDuplicates[0].blockId !== bookmarkDuplicates[1].blockId,
+    'Bookmark filtering renumbered or collapsed duplicate source paragraphs',
+  )
+  check(
+    bookmarkParagraphs.every((paragraph) =>
+      allBookmarkParagraphs.some(
+        (source) =>
+          source.blockId === paragraph.blockId &&
+          source.text === paragraph.text,
+      ),
+    ) && bookmarkSection.html === bookmarkSourceHtml,
+    'Bookmark filtering changed source paragraph IDs, text or chapter HTML',
+  )
+  const annotatedImageSection = {
+    ...bookmarkSection,
+    html: `${bookmarkSection.html}<div class="listening-image-description"><span data-listening-paragraph="image-description-fixture">Generated image description.</span></div>`,
+  }
+  check(
+    !getBookmarkParagraphs(annotatedImageSection).some(
+      (paragraph) => paragraph.blockId === 'image-description-fixture',
+    ),
+    'Quick bookmarks included an annotated image description',
   )
 
   const throws = (action, pattern, message) => {
@@ -473,7 +521,7 @@ async function verify(aliceBase64) {
   ambiguousRange.selectNodeContents(modified.getElementById('repeat-2'))
   throws(
     () => markerFromRange(markerBook, 'a.xhtml', ambiguousRange),
-    /mapped exactly/,
+    /This bookmark could not be mapped exactly to the EPUB/,
     'Changed duplicate source must not use approximate text matching',
   )
   throws(
@@ -482,7 +530,7 @@ async function verify(aliceBase64) {
         ...record,
         marker: { ...nestedMarker, text: 'Changed source text' },
       }),
-    /no longer matches/,
+    /The bookmark no longer matches this EPUB/,
     'Stale marker text',
   )
   throws(
@@ -491,12 +539,12 @@ async function verify(aliceBase64) {
         ...record,
         marker: { ...nestedMarker, blockId: 'missing' },
       }),
-    /no longer matches/,
+    /The bookmark no longer matches this EPUB/,
     'Missing marker block',
   )
   throws(
     () => buildQuietSession(markerBook, { ...record, marker: undefined }),
-    /Save a paragraph/,
+    /Bookmark a paragraph first, or choose Chapter beginning/,
     'Missing marker',
   )
   throws(
@@ -635,6 +683,7 @@ async function verify(aliceBase64) {
       'Language and emphasis',
       'CDATA literal text',
       'Quiet narration omits implicit image alt and retains printed captions',
+      'Prose-only quick bookmarks preserve source IDs and duplicate ordinals without changing HTML',
       'Invalid archive error',
       'Disjoint nested paragraph mapping and duplicate ordinals',
       'Exact source identity and range-boundary selection',

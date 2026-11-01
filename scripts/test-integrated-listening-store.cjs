@@ -415,6 +415,179 @@ test('deletion during EPUB preparation is detected before a new listening record
   )
 })
 
+test('bookmark save captures the actual preceding transaction and returns detached snapshots', async () => {
+  const { db, api } = harness()
+  await seed(db)
+  const initial = await api.loadLibraryListeningBook('book-a')
+  const gate = db.pauseTransaction(2)
+  const pending = api.saveLibraryBookmark(
+    'book-a',
+    marker('III', 'My bookmark'),
+    initial.record.fingerprint,
+    { from: 'OPS/III.xhtml', through: 'OPS/IV.xhtml' },
+  )
+  await gate.entered
+  const otherTab = await api.saveLibraryMarker(
+    'book-a',
+    marker('I', 'The preceding bookmark'),
+    initial.record.fingerprint,
+    { from: 'OPS/I.xhtml', through: 'OPS/II.xhtml' },
+  )
+  gate.release()
+  const change = await pending
+  same(
+    change.previous,
+    otherTab,
+    'Previous was read before the write transaction',
+  )
+  assert.equal(change.record.marker.text, 'My bookmark')
+  assert(change.record.updatedAt > change.previous.updatedAt)
+  const persisted = await db.listening.get('book-a')
+  change.record.marker.text = 'Caller mutation of saved snapshot'
+  change.previous.marker.text = 'Caller mutation of preceding snapshot'
+  same(await db.listening.get('book-a'), persisted)
+  assert.equal(otherTab.marker.text, 'The preceding bookmark')
+})
+
+test('bookmark undo restores the preceding plan without changing launch snapshots or canonical data', async () => {
+  for (const precedingBookmark of [false, true]) {
+    const { db, api } = harness()
+    await seed(db)
+    const initial = await api.loadLibraryListeningBook('book-a')
+    if (precedingBookmark)
+      await api.saveLibraryMarker(
+        'book-a',
+        marker('I', 'Restore this bookmark'),
+        initial.record.fingerprint,
+        { from: 'OPS/I.xhtml', through: 'OPS/II.xhtml' },
+      )
+    const change = await api.saveLibraryBookmark(
+      'book-a',
+      marker('III'),
+      initial.record.fingerprint,
+      { from: 'OPS/III.xhtml', through: 'OPS/IV.xhtml' },
+    )
+    const launchId = await api.createQuietLaunch('book-a', change.record)
+    const beforeBook = await db.books.get('book-a')
+    const beforeFile = await db.files.get('book-a')
+    db.writes.length = 0
+    const restored = await api.undoLibraryBookmark(
+      'book-a',
+      change.record,
+      change.previous,
+    )
+    same(restored, { ...change.previous, updatedAt: restored.updatedAt })
+    assert(restored.updatedAt > change.record.updatedAt)
+    same(await db.listening.get('book-a'), restored)
+    same((await api.loadQuietLaunch('book-a', launchId)).record, change.record)
+    same(await db.books.get('book-a'), beforeBook)
+    assert.equal(
+      await (await db.files.get('book-a')).file.text(),
+      await beforeFile.file.text(),
+    )
+    same(db.writes, [{ table: 'listening', operation: 'put', key: 'book-a' }])
+    await assert.rejects(
+      api.undoLibraryBookmark('book-a', change.record, change.previous),
+      /bookmark changed/i,
+    )
+    same(await db.listening.get('book-a'), restored)
+  }
+})
+
+test('a newer range or bookmark rejects a delayed undo without overwriting the other window', async () => {
+  const { db, api } = harness()
+  await seed(db)
+  const initial = await api.loadLibraryListeningBook('book-a')
+  const change = await api.saveLibraryBookmark(
+    'book-a',
+    marker(),
+    initial.record.fingerprint,
+    { from: 'OPS/II.xhtml', through: 'OPS/IV.xhtml' },
+  )
+  const gate = db.pauseTransaction(1)
+  const pending = api.undoLibraryBookmark(
+    'book-a',
+    change.record,
+    change.previous,
+  )
+  await gate.entered
+  const newer = await api.updateListeningRecord(
+    'book-a',
+    { through: 'OPS/III.xhtml' },
+    initial.record.fingerprint,
+  )
+  const rejected = assert.rejects(pending, /bookmark changed/i)
+  gate.release()
+  await rejected
+  same(await db.listening.get('book-a'), newer)
+
+  // Compare the complete plan as well as the timestamp, including marker text.
+  const sameRevision = clone(newer)
+  sameRevision.marker.text = 'Changed bookmark with a reused timestamp'
+  await db.listening.put(sameRevision)
+  await assert.rejects(
+    api.undoLibraryBookmark('book-a', newer, change.previous),
+    /bookmark changed/i,
+  )
+  same(await db.listening.get('book-a'), sameRevision)
+
+  await db.listening.delete('book-a')
+  const writesBeforeMissingUndo = db.writes.length
+  await assert.rejects(
+    api.undoLibraryBookmark('book-a', newer, change.previous),
+    /bookmark changed/i,
+  )
+  assert.equal(await db.listening.get('book-a'), undefined)
+  assert.equal(db.writes.length, writesBeforeMissingUndo)
+})
+
+test('bookmark save and undo reject replaced sources, wrong books, and deleted books', async () => {
+  const { db, api } = harness()
+  await seed(db)
+  await seed(db, 'book-b')
+  const initial = await api.loadLibraryListeningBook('book-a')
+  const change = await api.saveLibraryBookmark(
+    'book-a',
+    marker(),
+    initial.record.fingerprint,
+  )
+  await assert.rejects(
+    api.undoLibraryBookmark('book-b', change.record, change.previous),
+    changed,
+  )
+  assert.equal(await db.listening.get('book-b'), undefined)
+  await db.files.put({ id: 'book-a', file: new Blob(['EPUB revision B']) })
+  await assert.rejects(
+    api.saveLibraryBookmark(
+      'book-a',
+      marker('III'),
+      initial.record.fingerprint,
+    ),
+    changed,
+  )
+  await assert.rejects(
+    api.undoLibraryBookmark('book-a', change.record, change.previous),
+    changed,
+  )
+  same(await db.listening.get('book-a'), change.record)
+  const reset = await api.resetLibraryListeningBook('book-a')
+  await assert.rejects(
+    api.undoLibraryBookmark('book-a', change.record, change.previous),
+    changed,
+  )
+  same(await db.listening.get('book-a'), reset.record)
+  await db.books.delete('book-a')
+  await assert.rejects(
+    api.saveLibraryBookmark('book-a', marker(), reset.record.fingerprint),
+    /not available/,
+  )
+  await assert.rejects(
+    api.undoLibraryBookmark('book-a', change.record, change.previous),
+    /not available/,
+  )
+  same(await db.listening.get('book-a'), reset.record)
+})
+
 async function main() {
   console.log(
     'Node persistence unit tests: real integrated.ts + WebCrypto; structured-clone memory DB.',

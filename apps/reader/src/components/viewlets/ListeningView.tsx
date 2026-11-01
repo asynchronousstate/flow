@@ -8,7 +8,7 @@ import { db } from '../../db'
 import { useAction, useMobile } from '../../hooks'
 import {
   buildQuietSession,
-  getListeningParagraphs,
+  getBookmarkParagraphs,
   sameSourceHref,
 } from '../../listening/document'
 import { ListeningBook } from '../../listening/epub'
@@ -83,8 +83,8 @@ export function ListeningView({ className }: PaneViewProps) {
         ) : (
           <div className="flow-listening-body">
             <p>
-              Open a book, then choose the chapters and paragraph to listen
-              from.
+              Open a book, then choose the chapters and bookmark where listening
+              starts.
             </p>
             <p className="flow-listening-hint">
               The library’s Listen action opens the book here.
@@ -165,7 +165,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
     setDraft((current) =>
       current ? { ...current, marker, startAt: 'marker' } : current,
     )
-    setNotice('Saved by you. Your chapter range is unchanged.')
+    setNotice('Bookmark saved. Your chapter range is unchanged.')
     setFallbackHref('')
   }, [draft, stored])
 
@@ -202,7 +202,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
     sections.find((section) => section.sourceHref === previewHref) ??
     fromSection
   const paragraphs = useMemo(
-    () => (previewSection ? getListeningParagraphs(previewSection) : []),
+    () => (previewSection ? getBookmarkParagraphs(previewSection) : []),
     [previewSection],
   )
 
@@ -240,7 +240,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
           ? { ...current, marker: nextMarker, startAt: 'marker' }
           : current,
       )
-      setNotice('Saved by you. Your chapter range is unchanged.')
+      setNotice('Bookmark saved. Your chapter range is unchanged.')
       setFallbackHref('')
       setPickerOpen(false)
     } catch (reason) {
@@ -315,8 +315,8 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
             {bookChanged ? (
               <>
                 <p className="flow-listening-hint">
-                  Reset the old listening range and saved paragraph for this
-                  version. Your book and annotations stay in your library.
+                  Reset the old listening range and bookmark for this version.
+                  Your book and annotations stay in your library.
                 </p>
                 <button
                   type="button"
@@ -410,23 +410,24 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
             onChange={() => changePlan({ startAt: 'marker' })}
           />
           <span>
-            <MdBookmarkBorder aria-hidden="true" /> Saved by you
+            <MdBookmarkBorder aria-hidden="true" /> Bookmark
           </span>
         </label>
         {draft.marker ? (
           <div className="flow-listening-marker">
             <p className="flow-listening-hint">
-              {markerSection?.title ?? 'Saved chapter unavailable'}
+              {markerSection?.title ?? 'Bookmarked chapter unavailable'}
             </p>
             <blockquote>{draft.marker.text}</blockquote>
             <p className="flow-listening-hint">
-              Saved on this device. This does not track Edge’s spoken position.
+              Bookmarked on this device. This does not track Edge’s spoken
+              position.
             </p>
           </div>
         ) : (
           <p className="flow-listening-hint">
-            Select text in the book and choose “Use as listening start”, or
-            choose a paragraph below.
+            Select text in the book and choose “Bookmark”, or bookmark a
+            paragraph below.
           </p>
         )}
       </fieldset>
@@ -435,8 +436,8 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
         <div className="flow-listening-resolution" role="alert">
           <p>
             {markerOutside
-              ? 'Your saved paragraph is outside this range.'
-              : 'Your saved paragraph is in a different From chapter.'}
+              ? 'Your bookmark is outside this range.'
+              : 'Your bookmark is in a different From chapter.'}
           </p>
           <p className="flow-listening-hint">
             Choose which start to use before opening.
@@ -447,7 +448,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
             disabled={saving}
             onClick={() => changePlan({ from: markerSection!.sourceHref })}
           >
-            Update From to saved chapter
+            Update From to bookmarked chapter
           </button>
           <button
             type="button"
@@ -486,11 +487,11 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
             setPickerOpen(!pickerOpen)
           }}
         >
-          {pickerOpen ? 'Close paragraph picker' : 'Choose a paragraph'}
+          {pickerOpen ? 'Close Bookmark' : 'Bookmark'}
         </button>
         {pickerOpen && (
           <div id="flow-listening-paragraph-picker">
-            <label htmlFor="flow-listening-preview">Preview chapter</label>
+            <label htmlFor="flow-listening-preview">Bookmark chapter</label>
             <select
               id="flow-listening-preview"
               value={previewSection?.sourceHref ?? ''}
@@ -507,7 +508,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
               ))}
             </select>
             <p className="flow-listening-hint">
-              Each button saves that whole paragraph as your listening start.
+              Bookmark a paragraph to use it as your next listening start.
             </p>
             <ol className="flow-listening-paragraphs">
               {paragraphs.slice(0, paragraphLimit).map((paragraph, index) => (
@@ -520,7 +521,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
                     }
                   >
                     <span className="flow-listening-paragraph-number">
-                      Paragraph {index + 1}
+                      Bookmark paragraph {index + 1}
                     </span>
                     <span>{paragraph.text}</span>
                   </button>
@@ -529,8 +530,8 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
             </ol>
             {!paragraphs.length && (
               <p>
-                No selectable paragraphs in this section. Choose another
-                chapter.
+                No paragraphs available to bookmark in this section. Choose
+                another chapter.
               </p>
             )}
             {paragraphs.length > paragraphLimit && (
@@ -556,7 +557,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
           {validation || markerNeedsFrom
             ? 'Resolve the range above.'
             : draft.startAt === 'marker'
-            ? `Your saved paragraph in ${markerSection?.title}`
+            ? `Your bookmark in ${markerSection?.title}`
             : `Beginning of ${fromSection?.title}`}
         </p>
       </div>

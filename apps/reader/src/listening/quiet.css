@@ -259,13 +259,70 @@
   white-space: pre-wrap;
 }
 
-.flow-quiet-marking [data-listening-paragraph] {
-  cursor: pointer;
+.flow-quiet-article-host {
+  position: relative;
 }
 
-.flow-quiet-marking [data-listening-paragraph]:hover {
-  background: #edf8fe;
-  outline: 1px solid #b3ddf2;
+.flow-quiet-bookmarks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.flow-quiet .flow-quiet-bookmark {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 1em;
+  height: 1em;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: #00799b;
+  line-height: 1;
+  pointer-events: auto;
+  touch-action: pan-y;
+}
+
+.flow-quiet .flow-quiet-bookmark:is(:hover, :disabled) {
+  background: transparent;
+  opacity: 1;
+}
+
+.flow-quiet-bookmark svg {
+  width: 1em;
+  height: 1em;
+  opacity: 0.06;
+}
+
+.flow-quiet .flow-quiet-bookmark[aria-pressed='true'] {
+  background: #00799b;
+  color: #fff;
+}
+
+.flow-quiet-bookmark[aria-pressed='true'] svg {
+  fill: currentColor;
+  opacity: 1;
+}
+
+.flow-quiet-bookmark-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: min(100%, 780px);
+  margin: 0 auto;
+  padding: 16px 28px 24px;
+  border-top: 1px solid #e2e7ec;
+  color: #42515e;
+  font-size: 13px;
+}
+
+.flow-quiet-bookmark-status p {
+  margin: 0;
 }
 
 .flow-quiet-recovery,

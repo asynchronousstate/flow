@@ -33,6 +33,23 @@ export function getListeningParagraphs(
   }))
 }
 
+/** Bookmark controls use prose only, without renumbering source locators. */
+export function getBookmarkParagraphs(
+  section: ListeningSection,
+): ListeningParagraph[] {
+  return paragraphElements(parseSection(section))
+    .filter(
+      (element) =>
+        !element.closest(
+          'h1, h2, h3, h4, h5, h6, figcaption, pre, td, th, .listening-image-description',
+        ),
+    )
+    .map((element) => ({
+      blockId: element.getAttribute(paragraphAttribute)!,
+      text: listeningText(element),
+    }))
+}
+
 function normalizedHref(href: string): string | undefined {
   try {
     const path = decodeURIComponent(href.split(/[?#]/, 1)[0] ?? '')
@@ -90,7 +107,7 @@ function sectionIndex(book: ListeningBook, href: string): number {
   if (matches.length !== 1) {
     throw new Error(
       matches.length
-        ? 'This chapter path matches more than one chapter. Reopen the intended chapter and save its paragraph again.'
+        ? 'This chapter path matches more than one chapter. Reopen the intended chapter and bookmark it again.'
         : 'This chapter is no longer available. Choose a chapter from this book again.',
     )
   }
@@ -157,7 +174,7 @@ function selectedParagraph(root: Element, range: Range) {
       return { paragraph, node, paragraphs }
     }
   }
-  throw new Error('Select readable text in the paragraph you want to save.')
+  throw new Error('Select readable text in the paragraph you want to bookmark.')
 }
 
 /** Map a renderer selection using paragraph ordinal AND exact text identity.
@@ -179,7 +196,7 @@ export function markerFromRange(
     !body.contains(range.endContainer)
   )
     throw new Error(
-      'This selection is not in the book text. Reopen the chapter and select a paragraph.',
+      'This selection is not in the book text. Reopen the chapter and bookmark a paragraph.',
     )
   const selected = selectedParagraph(body, range)
   const prepared = getListeningParagraphs(section)
@@ -206,7 +223,7 @@ export function markerFromRange(
   }
   if (!target) {
     throw new Error(
-      'This paragraph could not be mapped exactly to the EPUB. Reopen the chapter, or choose the paragraph in listening setup; no approximate position was saved.',
+      'This bookmark could not be mapped exactly to the EPUB. Reopen the chapter, or use Bookmark in listening setup; no approximate position was saved.',
     )
   }
   return {
@@ -235,11 +252,13 @@ export function buildQuietSession(
   if (record.startAt === 'marker') {
     const marker = record.marker
     if (!marker)
-      throw new Error('Save a paragraph first, or choose Chapter beginning.')
+      throw new Error(
+        'Bookmark a paragraph first, or choose Chapter beginning.',
+      )
     const markerChapter = sectionIndex(book, marker.sourceHref)
     if (markerChapter !== from) {
       throw new Error(
-        `Your saved paragraph is in “${
+        `Your bookmark is in “${
           book.sections[markerChapter]!.title
         }”. Change From to that chapter, or choose Chapter beginning.`,
       )
@@ -257,7 +276,7 @@ export function buildQuietSession(
       !marker.text
     ) {
       throw new Error(
-        'The saved paragraph no longer matches this EPUB. Save it again, or choose Chapter beginning.',
+        'The bookmark no longer matches this EPUB. Bookmark it again, or choose Chapter beginning.',
       )
     }
     const heading = doc.querySelector('h1, h2, h3, h4, h5, h6')

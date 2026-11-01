@@ -412,7 +412,7 @@ export default function ListeningApp({
               <div className="listening-storage">
                 <p role="status">{storageStatus}</p>
                 <p className="listening-storage-note">
-                  Reopens from your chosen starting paragraph. Edge’s last
+                  Reopens from your bookmark or chapter beginning. Edge’s last
                   spoken word is not tracked.
                 </p>
                 {(book || storageExists) && (
@@ -474,7 +474,7 @@ export default function ListeningApp({
                   </label>
                 </div>
                 <label className="listening-paragraph">
-                  Starting paragraph
+                  Bookmark
                   <select
                     value={paragraph}
                     onChange={(e) => setParagraph(Number(e.target.value))}

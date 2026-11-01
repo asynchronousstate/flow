@@ -160,7 +160,7 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
       setListeningError(
         error instanceof Error
           ? error.message
-          : 'Could not save this paragraph.',
+          : 'Could not save this bookmark.',
       )
     } finally {
       setSavingStart(false)
@@ -290,9 +290,10 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
             <button
               type="button"
               disabled={savingStart}
+              aria-label="Bookmark this paragraph for listening"
               onClick={saveListeningStart}
             >
-              {savingStart ? 'Saving paragraph…' : 'Use as listening start'}
+              {savingStart ? 'Saving bookmark…' : 'Bookmark'}
             </button>
             {listeningError && <p role="alert">{listeningError}</p>}
           </div>
