@@ -4,6 +4,10 @@ The original Flow ebook workflow now includes Edge-native listening: a cover
 action, reader Listening panel, From/Through range, manual paragraph start,
 continuous quiet document, and return to the ebook.
 
+**Open the app:** https://flow-listening-v2.vercel.app
+
+**Source:** https://github.com/asynchronousstate/flow/tree/codex/flow-listening-v2
+
 ## Included in this release
 
 - Preserve original library, reader, search, annotations, typography and normal
@@ -34,6 +38,9 @@ Edge's native speech or keep it running in the background.
 ## Validation
 
 The release includes the passing native desktop Gunboat 315 to 316 test report,
-16 browser document regression groups and seven storage unit tests. Production
-deployment and live mobile-size checks are recorded separately after publishing.
-See [the native evidence and limits](gunboat-edge-listening-test.md).
+16 browser document regression groups and seven storage unit tests. Vercel's
+clean Linux production build passed. Live phone-size checks at 390 pixels
+verified EPUB import, cover Listen, range selection, manual paragraph saving,
+quiet-document content, reload restoration and return to the ebook.
+See [the native evidence and limits](gunboat-edge-listening-test.md) and
+[deployment instructions](flow-listening-v2-deployment.md).

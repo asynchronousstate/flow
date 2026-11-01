@@ -1,5 +1,10 @@
 # Flow Listening on Vercel
 
+For the integrated **Flow Listening v2**, use
+[the v2 deployment instructions](flow-listening-v2-deployment.md) and
+https://flow-listening-v2.vercel.app. The remainder of this document describes
+the earlier standalone PWA deployment.
+
 The listening PWA is a static application. Its original Sites deployment and identity remain separate from Vercel.
 
 ## Current production deployment

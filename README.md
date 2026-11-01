@@ -81,8 +81,8 @@ The document regression fixture is generated with
 
 ### Android PWA
 
-Open the v2 production URL from the GitHub release in Microsoft Edge on your
-phone, then use Edge's **Add to Home screen** or install option. Import your EPUB
+Open [Flow Listening v2](https://flow-listening-v2.vercel.app) in Microsoft Edge on
+your phone, then use Edge's **Add to Home screen** or install option. Import your EPUB
 on that phone and follow the same cover → Listen → Open quiet document flow.
 If the installed view hides Read aloud, open the same quiet-document URL in
 Edge's browser window using the same profile. Books and saved starts belong to
