@@ -21,17 +21,16 @@ import {
   saveLibraryMarker,
   updateListeningRecord,
 } from '../../listening/integrated'
+import {
+  AppliedListeningPlan,
+  captureListeningPlan,
+  reconcileListeningPlan,
+} from '../../listening/plan'
 import { reader, useReaderSnapshot } from '../../models'
 import { PaneViewProps } from '../base'
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Could not prepare listening.'
-}
-
-function markerKey(marker?: ListeningMarker) {
-  return marker
-    ? `${marker.sourceHref}:${marker.blockId}:${marker.savedAt}`
-    : ''
 }
 
 export function ListeningView({ className }: PaneViewProps) {
@@ -112,7 +111,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
   const [previewHref, setPreviewHref] = useState('')
   const [paragraphLimit, setParagraphLimit] = useState(20)
   const [notice, setNotice] = useState('')
-  const appliedMarker = useRef({ key: '', savedAt: 0 })
+  const appliedPlan = useRef<AppliedListeningPlan>()
   const alive = useRef(true)
 
   useEffect(() => {
@@ -131,10 +130,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
     loadLibraryListeningBook(bookId)
       .then((loaded) => {
         if (cancelled) return
-        appliedMarker.current = {
-          key: markerKey(loaded.record.marker),
-          savedAt: loaded.record.marker?.savedAt ?? 0,
-        }
+        appliedPlan.current = captureListeningPlan(loaded.record)
         setBook(loaded.book)
         setDraft(loaded.record)
       })
@@ -149,23 +145,23 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
     }
   }, [bookId, retry])
 
-  // A selection or another quiet-document tab may save a marker while this
-  // form is open. Merge that explicit choice without resetting draft ranges.
+  // Another quiet-document tab may save or undo a bookmark while this form is
+  // open. Follow plan revisions: Undo can restore an older savedAt or no marker.
   useEffect(() => {
-    if (!stored || !draft || stored.fingerprint !== draft.fingerprint) return
-    const marker = stored.marker
-    const key = markerKey(marker)
-    if (
-      !marker ||
-      key === appliedMarker.current.key ||
-      marker.savedAt < appliedMarker.current.savedAt
-    )
-      return
-    appliedMarker.current = { key, savedAt: marker.savedAt }
+    if (!stored || !draft) return
+    const next = reconcileListeningPlan(draft, stored, appliedPlan.current)
+    appliedPlan.current = next.applied
+    if (!next.changed) return
     setDraft((current) =>
-      current ? { ...current, marker, startAt: 'marker' } : current,
+      current
+        ? { ...current, marker: next.draft.marker, startAt: next.draft.startAt }
+        : current,
     )
-    setNotice('Bookmark saved. Your chapter range is unchanged.')
+    setNotice(
+      next.draft.startAt === 'marker'
+        ? 'Bookmark updated. Your chapter range is unchanged.'
+        : 'Listening start updated. Your chapter range is unchanged.',
+    )
     setFallbackHref('')
   }, [draft, stored])
 
@@ -231,10 +227,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
       const saved = await saveLibraryMarker(bookId, marker, draft.fingerprint)
       if (!alive.current) return
       const nextMarker = saved.marker ?? marker
-      appliedMarker.current = {
-        key: markerKey(nextMarker),
-        savedAt: nextMarker.savedAt,
-      }
+      appliedPlan.current = captureListeningPlan(saved)
       setDraft((current) =>
         current
           ? { ...current, marker: nextMarker, startAt: 'marker' }
