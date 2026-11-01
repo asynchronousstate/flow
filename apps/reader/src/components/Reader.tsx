@@ -393,7 +393,8 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
     }
   })
 
-  useDisablePinchZooming(iframe)
+  // The paginated reader owns swipe gestures for page turns.
+  useDisablePinchZooming(iframe, { preventPan: !!iframe })
 
   return (
     <div className={clsx('flex h-full flex-col', mobile && 'py-[3vw]')}>
