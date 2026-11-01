@@ -48,8 +48,9 @@ The four selected features now use the original Flow application and library:
   listening setup does not clear the book’s annotations or reading progress.
 - Selected text maps through the source paragraph sequence and exact text, so
   identical paragraphs do not silently resolve to the first matching phrase.
-- Quick bookmark icons and the Bookmark lists use prose paragraphs, including
-  list items and quoted prose. Headings, captions, table cells, preformatted
+- Quick bookmark icons and the setup picker use prose paragraphs, including
+  list items and quoted prose. The quiet document's Tools list retains the
+  original full set of manual choices. Headings, captions, table cells, preformatted
   blocks and generated image descriptions do not receive quick icons. Filtering
   preserves original paragraph identifiers and duplicate-paragraph ordinals;
   existing stored bookmarks and source-selection mapping remain compatible.
@@ -69,10 +70,9 @@ The four selected features now use the original Flow application and library:
   WebCrypto and a structured-clone memory database, including bookmark saving
   and safe Undo. These tests do not replace a real IndexedDB migration test.
   All five real touch-gesture regression groups also passed.
-- Reader TypeScript and focused ESLint checks passed. The first production
-  build passed Next.js validation, optimized compilation and all 30 localized
-  static pages. That build preceded the final small fix; the final Vercel build
-  will validate the exact release commit.
+- Reader TypeScript and focused ESLint checks passed. The final Vercel production
+  build of `b3025e2` passed Next.js validation, optimized compilation and all 30
+  localized static pages.
 - Browser UI checks on an Alice chapter II–III launch found one icon for each
   of its 50 prose paragraphs. Unselected icons had opacity `0.06`, transparent
   backgrounds and no border. Saving the second paragraph selected a white icon
@@ -84,8 +84,15 @@ The four selected features now use the original Flow application and library:
   omitted the earlier “Curiouser and curiouser” prose, and retained both selected
   chapter sections.
 - At a 390px viewport, bookmark icons measured 21px to match the prose and the
-  page had no horizontal overflow. This is responsive browser verification,
+  page had no horizontal overflow. Page Down moved the document scroll position
+  to 738.5px and Control+Home restored it to zero. This is responsive browser verification,
   not a physical Android swipe test.
+- The production alias at `https://flow-listening-v2.vercel.app` was updated to
+  deployment `dpl_46XxHYN2dUBJNqJu5ELXAedNcUf2` from code commit `b3025e2`.
+  Live browser checks verified renamed setup controls, a hydrated white bookmark,
+  6% transparent idle controls, and saving then undoing a later Alice paragraph
+  without changing article text. The root, quiet route, manifest and service worker
+  all returned HTTP 200 without authentication.
 
 ## Native narration and device coverage
 
