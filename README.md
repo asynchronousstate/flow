@@ -52,7 +52,10 @@ Copy and rename all `.env.local.example`s to `.env.local` and setup the environm
 pnpm dev
 ```
 
-## Flow Listening v2
+## Flow Listening 2.2
+
+Latest release: [Flow Listening 2.2.0](https://github.com/asynchronousstate/flow/releases/tag/v2.2.0).
+See [what changed and the validation limits](docs/flow-listening-v2.2-release.md).
 
 Flow Listening v2 keeps the original Flow library, reader, annotations, search,
 typography and reading progress, and adds listening to the ebook workflow.
