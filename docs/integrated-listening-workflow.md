@@ -89,6 +89,15 @@ The four selected features now use the original Flow application and library:
 - Current-run screenshots are local artifacts under
   `.tmp/listening-range-implementation-20261101/`. Native Android Edge narration,
   background playback and installed-PWA behavior were not retested in this pass.
+- Code commit `537f001` was pushed to `codex/flow-listening-v2` and deployed to
+  `https://flow-listening-v2.vercel.app` at 2026-11-02 00:51 UTC. Deployment
+  `dpl_A5HVKKzqiZYFFpSsNf7nP9aAEYy1` passed the clean Linux lint/type/build checks
+  and all 30 localized pages. A new live browser tab confirmed the chapter-only
+  selectors, default saved Bookmark preview and removal of the setup picker;
+  the deployed panel was also inspected at 390 pixels wide.
+- The earlier standalone PWA still builds. Its source archive now includes the
+  exact EPUB Navigation runtime, helper, types and license, and was rebuilt
+  outside the repository using only its declared dependency mirrors.
 
 ## Earlier Bookmark verification on 1 November 2026
 
