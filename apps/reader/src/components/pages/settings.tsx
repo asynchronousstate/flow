@@ -13,6 +13,7 @@ import { localeNames } from '@flow/reader/locales'
 import { useSettings } from '@flow/reader/state'
 import { dbx, mapToToken, OAUTH_SUCCESS_MESSAGE } from '@flow/reader/sync'
 
+import readerPackage from '../../../package.json'
 import { Button } from '../Button'
 import { Checkbox, Select } from '../Form'
 import { Page } from '../Page'
@@ -78,6 +79,10 @@ export const Settings: React.FC = () => {
             {t('cache.clear')}
           </Button>
         </Item>
+        <p className="typescale-body-small text-on-surface-variant">
+          Flow Listening{' '}
+          {readerPackage.version.split('.').slice(0, 2).join('.')}
+        </p>
       </div>
     </Page>
   )

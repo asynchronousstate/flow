@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react'
-import { MdChevronRight, MdWebAsset } from 'react-icons/md'
+import { MdChevronRight, MdHeadset, MdWebAsset } from 'react-icons/md'
 import { RiBookLine } from 'react-icons/ri'
 import { PhotoSlider } from 'react-photo-view'
 import { useSetRecoilState } from 'recoil'
@@ -25,6 +25,7 @@ import {
   useColorScheme,
   useDisablePinchZooming,
   useMobile,
+  useSetAction,
   useSync,
   useTranslation,
   useTypography,
@@ -45,6 +46,14 @@ import * as pages from './pages'
 
 function handleKeyDown(tab?: BookTab) {
   return (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null
+    if (
+      e.defaultPrevented ||
+      target?.closest?.(
+        'input, textarea, select, button, a, [contenteditable="true"], .flow-listening-panel',
+      )
+    )
+      return
     try {
       switch (e.code) {
         case 'ArrowLeft':
@@ -384,7 +393,8 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
     }
   })
 
-  useDisablePinchZooming(iframe)
+  // The paginated reader owns swipe gestures for page turns.
+  useDisablePinchZooming(iframe, { preventPan: !!iframe })
 
   return (
     <div className={clsx('flex h-full flex-col', mobile && 'py-[3vw]')}>
@@ -423,6 +433,7 @@ interface ReaderPaneHeaderProps {
   tab: BookTab
 }
 const ReaderPaneHeader: React.FC<ReaderPaneHeaderProps> = ({ tab }) => {
+  const setAction = useSetAction()
   const { location } = useSnapshot(tab)
   const navPath = tab.getNavPath()
 
@@ -431,7 +442,17 @@ const ReaderPaneHeader: React.FC<ReaderPaneHeaderProps> = ({ tab }) => {
   }, [navPath])
 
   return (
-    <Bar>
+    <Bar className="flow-listening-reader-header">
+      <button
+        type="button"
+        className="flow-listening-entry shrink-0"
+        onClick={() => {
+          reader.addTab(tab)
+          setAction('listening')
+        }}
+      >
+        <MdHeadset aria-hidden="true" /> Listen
+      </button>
       <div className="scroll-h flex">
         {navPath.map((item, i) => (
           <button

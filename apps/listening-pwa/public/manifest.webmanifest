@@ -1,0 +1,33 @@
+{
+  "id": "/",
+  "name": "Flow Listening",
+  "short_name": "Flow",
+  "description": "Continuous EPUB listening pages for Microsoft Edge",
+  "lang": "en",
+  "start_url": "/?source=homescreen",
+  "scope": "/",
+  "display": "minimal-ui",
+  "background_color": "#f6f4ee",
+  "theme_color": "#285749",
+  "categories": ["books", "education"],
+  "icons": [
+    {
+      "src": "/icons/192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

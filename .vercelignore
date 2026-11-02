@@ -1,0 +1,13 @@
+.git/
+.tmp/
+.vercel/
+**/.vercel/
+**/.openai/
+**/node_modules/
+**/.next/
+**/dist/
+.env*
+**/.env*
+design/
+design-qa.md
+docs/

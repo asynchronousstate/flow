@@ -1,8 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/web-manifest-combined.json",
-  "name": "Flow",
+  "id": "/",
+  "name": "Flow Listening",
   "short_name": "Flow",
-  "description": "Redefine EPUB reader",
+  "description": "Read EPUBs in Flow and prepare continuous documents for Microsoft Edge Read aloud.",
   "icons": [
     {
       "src": "/icons/192.png",
@@ -30,14 +31,15 @@
   "theme_color": "#fff",
   "background_color": "#fff",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "file_handlers": [
     {
       "action": "/",
       "accept": {
-        "application/epub+zip": ".epub",
-        "application/epub": ".epub"
+        "application/epub+zip": [".epub"],
+        "application/epub": [".epub"]
       },
       "launch_type": "single-client"
     }

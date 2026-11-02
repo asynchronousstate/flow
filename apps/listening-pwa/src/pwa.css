@@ -1,0 +1,101 @@
+html {
+  background: #f6f4ee;
+}
+body {
+  margin: 0;
+}
+.pwa-card {
+  margin: 24px 0;
+  padding: 22px;
+  border: 1px solid #d5dfd4;
+  border-radius: 16px;
+  background: #edf1e8;
+}
+.pwa-card-heading {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.pwa-card h2 {
+  font-size: 18px;
+  font-weight: 650;
+}
+.pwa-card p {
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 10px 0;
+  color: #425d50;
+}
+.pwa-card-heading p {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.pwa-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #285749;
+  color: white;
+  font-size: 24px;
+  flex-shrink: 0;
+}
+.pwa-link-control {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pwa-link-control button {
+  min-height: 44px;
+  padding: 8px 0;
+  text-decoration: underline;
+  font-weight: 650;
+}
+.pwa-link-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #536e60;
+}
+.pwa-card .pwa-fine-print {
+  font-size: 12px;
+}
+.pwa-fine-print a {
+  text-decoration: underline;
+}
+.pwa-session-help {
+  font-size: 12px;
+  max-width: 480px;
+}
+.pwa-session-help > span:last-child {
+  display: block;
+  line-height: 1.5;
+}
+@media (max-width: 600px) {
+  .listening-setup {
+    padding: max(24px, env(safe-area-inset-top)) 20px 44px;
+  }
+  .listening-brand {
+    margin-bottom: 30px;
+  }
+  .listening-file-actions > * {
+    width: 100%;
+  }
+  .listening-page select {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    font-size: 16px;
+  }
+  .listening-primary {
+    min-height: 48px;
+  }
+  .pwa-card {
+    padding: 18px;
+  }
+}

@@ -20,7 +20,12 @@ import {
   useTranslation,
   useTypography,
 } from '../hooks'
-import { BookTab } from '../models'
+import { markerFromRange } from '../listening/document'
+import {
+  loadLibraryListeningBook,
+  saveLibraryMarker,
+} from '../listening/integrated'
+import { BookTab, reader } from '../models'
 import { isTouchScreen, scale } from '../platform'
 import { useSettings } from '../state'
 import { copy, keys, last } from '../utils'
@@ -134,6 +139,33 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
   const cfi = tab.rangeToCfi(range)
   const annotation = tab.book.annotations.find((a) => a.cfi === cfi)
   const [annotate, setAnnotate] = useState(!!annotation)
+  const [savingStart, setSavingStart] = useState(false)
+  const [listeningError, setListeningError] = useState('')
+
+  async function saveListeningStart() {
+    const selectedRange = range.cloneRange()
+    const sourceHref = tab.view?.section?.href ?? tab.currentHref
+    setSavingStart(true)
+    setListeningError('')
+    try {
+      if (!sourceHref)
+        throw new Error('Wait for this chapter to finish loading.')
+      const { book, record } = await loadLibraryListeningBook(tab.book.id)
+      const marker = markerFromRange(book, sourceHref, selectedRange, cfi)
+      await saveLibraryMarker(tab.book.id, marker, record.fingerprint)
+      reader.addTab(tab)
+      setAction('listening')
+      hide()
+    } catch (error) {
+      setListeningError(
+        error instanceof Error
+          ? error.message
+          : 'Could not save this bookmark.',
+      )
+    } finally {
+      setSavingStart(false)
+    }
+  }
 
   const position = forward
     ? LayoutAnchorPosition.Before
@@ -251,6 +283,19 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
                 }}
               />
             )}
+          </div>
+        )}
+        {!annotate && (
+          <div className="flow-listening-selection">
+            <button
+              type="button"
+              disabled={savingStart}
+              aria-label="Bookmark this paragraph for listening"
+              onClick={saveListeningStart}
+            >
+              {savingStart ? 'Saving bookmark…' : 'Bookmark'}
+            </button>
+            {listeningError && <p role="alert">{listeningError}</p>}
           </div>
         )}
         <div className="space-y-2">

@@ -39,6 +39,34 @@ const config = {
   webpack(config) {
     return config
   },
+  async headers() {
+    // PWA assets live at the origin root, outside Next's locale-prefixed routes.
+    return [
+      {
+        source: '/manifest.json',
+        locale: false,
+        headers: [
+          { key: 'Content-Type', value: 'application/manifest+json' },
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=0, must-revalidate',
+          },
+        ],
+      },
+      {
+        source: '/sw.js',
+        locale: false,
+        headers: [
+          { key: 'Content-Type', value: 'application/javascript' },
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=0, must-revalidate',
+          },
+          { key: 'Service-Worker-Allowed', value: '/' },
+        ],
+      },
+    ]
+  },
   i18n: {
     locales: ['en-US', 'zh-CN', 'ja-JP', 'de-DE'],
     defaultLocale: 'en-US',

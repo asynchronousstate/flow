@@ -1,0 +1,380 @@
+.flow-quiet,
+.flow-quiet * {
+  box-sizing: border-box;
+}
+
+.flow-quiet {
+  min-height: 100%;
+  background: #fff;
+  color: #29323c;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  color-scheme: light;
+}
+
+.flow-quiet p {
+  padding: 0;
+}
+
+.flow-quiet button,
+.flow-quiet select {
+  font: inherit;
+  color: inherit;
+}
+
+.flow-quiet a {
+  color: #096b9e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.flow-quiet :is(button, a, summary, select):focus-visible {
+  outline: 2px solid #0076b2;
+  outline-offset: 3px;
+  box-shadow: none;
+}
+
+.flow-quiet button {
+  min-height: 42px;
+  padding: 9px 13px;
+  border: 1px solid #d3dce3;
+  border-radius: 4px;
+  background: #f8fafb;
+  cursor: pointer;
+}
+
+.flow-quiet button:hover {
+  background: #edf5f9;
+}
+
+.flow-quiet button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.flow-quiet-toolbar {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 54px;
+  padding: 6px 24px;
+  border-bottom: 1px solid #e2e7ec;
+  font-size: 13px;
+}
+
+.flow-quiet-return {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  flex-shrink: 0;
+}
+
+.flow-quiet .flow-quiet-return {
+  color: #42515e;
+  text-decoration: none;
+}
+
+.flow-quiet-tools {
+  max-width: min(100%, 680px);
+  min-width: 0;
+}
+
+.flow-quiet summary {
+  min-height: 42px;
+  padding: 11px 4px;
+  cursor: pointer;
+}
+
+.flow-quiet-tools > summary {
+  text-align: right;
+}
+
+.flow-quiet-tools[open] {
+  width: 680px;
+}
+
+.flow-quiet-panel {
+  padding: 16px 12px 24px;
+}
+
+.flow-quiet-panel :is(h1, h2) {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.flow-quiet-panel h1 {
+  font-size: 18px;
+}
+
+.flow-quiet-panel h2 {
+  font-size: 15px;
+}
+
+.flow-quiet-panel p {
+  margin: 8px 0;
+}
+
+.flow-quiet-muted {
+  color: #637181;
+}
+
+.flow-quiet-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.flow-quiet-marker-tools {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #e2e7ec;
+}
+
+.flow-quiet-choice {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #cce8f5;
+  border-radius: 4px;
+  background: #f0f9fd;
+}
+
+.flow-quiet-choice blockquote,
+.flow-quiet-paragraph-list li p {
+  margin: 12px 0 16px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 18px;
+  line-height: 1.65;
+}
+
+.flow-quiet-label {
+  font-weight: 600;
+  color: #096b9e;
+}
+
+.flow-quiet .flow-quiet-primary {
+  border-color: #007bb8;
+  background: #007bb8;
+  color: #fff;
+}
+
+.flow-quiet-paragraph-list {
+  margin-top: 16px;
+}
+
+.flow-quiet-paragraph-list label {
+  display: block;
+  margin: 8px 0 6px;
+}
+
+.flow-quiet-paragraph-list select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid #cbd5de;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.flow-quiet-paragraph-list ol {
+  max-height: 420px;
+  margin: 12px 0;
+  padding: 0 8px 0 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.flow-quiet-paragraph-list li {
+  padding: 14px 0;
+  border-top: 1px solid #e2e7ec;
+}
+
+.flow-quiet-close {
+  margin-top: 20px;
+}
+
+.flow-quiet-error {
+  color: #a22d2d;
+}
+
+.flow-quiet-article {
+  width: min(100%, 780px);
+  margin: 0 auto;
+  padding: 40px 28px 120px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 22px;
+  line-height: 1.75;
+}
+
+.flow-quiet-article > section + section {
+  margin-top: 3em;
+  padding-top: 1.5em;
+  border-top: 1px solid #e8edf0;
+}
+
+.flow-quiet-article :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.2em 0 0.65em;
+  font-family: inherit;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.flow-quiet-article :is(h1, h2) {
+  font-size: 1.5em;
+}
+
+.flow-quiet-article :is(h3, h4, h5, h6) {
+  font-size: 1.15em;
+}
+
+.flow-quiet-article p {
+  margin: 0 0 1em;
+}
+
+.flow-quiet-article blockquote {
+  margin: 1em 1.2em;
+}
+
+.flow-quiet-article ul,
+.flow-quiet-article ol {
+  margin: 1em 0;
+  padding-left: 1.5em;
+  list-style: revert;
+}
+
+.flow-quiet-article table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.flow-quiet-article pre {
+  white-space: pre-wrap;
+}
+
+.flow-quiet-article-host {
+  position: relative;
+}
+
+.flow-quiet-bookmarks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.flow-quiet .flow-quiet-bookmark {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 1em;
+  height: 1em;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: #00799b;
+  line-height: 1;
+  pointer-events: auto;
+  touch-action: pan-y;
+}
+
+.flow-quiet .flow-quiet-bookmark:is(:hover, :disabled) {
+  background: transparent;
+  opacity: 1;
+}
+
+.flow-quiet-bookmark svg {
+  width: 1em;
+  height: 1em;
+  opacity: 0.06;
+}
+
+.flow-quiet .flow-quiet-bookmark[aria-pressed='true'] {
+  background: #00799b;
+  color: #fff;
+}
+
+.flow-quiet-bookmark[aria-pressed='true'] svg {
+  fill: currentColor;
+  opacity: 1;
+}
+
+.flow-quiet-bookmark-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: min(100%, 780px);
+  margin: 0 auto;
+  padding: 16px 28px 24px;
+  border-top: 1px solid #e2e7ec;
+  color: #42515e;
+  font-size: 13px;
+}
+
+.flow-quiet-bookmark-status p {
+  margin: 0;
+}
+
+.flow-quiet-recovery,
+.flow-quiet-loading {
+  max-width: 660px;
+  margin: 40px auto;
+  padding: 0 24px;
+  font-size: 16px;
+}
+
+.flow-quiet-recovery h1 {
+  margin-bottom: 16px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.flow-quiet-recovery p {
+  margin: 12px 0;
+}
+
+.flow-quiet-recovery a {
+  display: inline-block;
+  margin: 12px 20px 0 0;
+}
+
+@media (max-width: 600px) {
+  .flow-quiet-toolbar {
+    gap: 10px;
+    padding: 6px 16px;
+    flex-wrap: wrap;
+  }
+
+  .flow-quiet-tools[open] {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .flow-quiet-panel {
+    padding: 12px 0 20px;
+  }
+
+  .flow-quiet-article {
+    padding: 28px 22px 80px;
+    font-size: 21px;
+    line-height: 1.7;
+  }
+
+  .flow-quiet-article :is(h1, h2) {
+    font-size: 1.35em;
+  }
+
+  .flow-quiet-choice {
+    padding: 12px;
+  }
+}

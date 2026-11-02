@@ -1,4 +1,7 @@
 import './styles.css'
+import '../listening/listening.css'
+import '../listening/integrated.css'
+import '../listening/quiet.css'
 import 'react-photo-view/dist/react-photo-view.css'
 
 import { LiteralProvider } from '@literal-ui/core'
@@ -12,7 +15,8 @@ import { Layout, Theme } from '../components'
 export default function MyApp({ Component, pageProps }: AppProps) {
   const router = useRouter()
 
-  if (router.pathname === '/success') return <Component {...pageProps} />
+  if (router.pathname === '/success' || router.pathname === '/listen')
+    return <Component {...pageProps} />
 
   return (
     <ErrorBoundary fallback={<Fallback />}>
