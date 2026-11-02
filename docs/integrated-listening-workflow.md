@@ -5,11 +5,17 @@ The four selected features now use the original Flow application and library:
 
 1. Choose **Listen** on a book cover, or in its reader header. The original
    ebook opens with a Listening range panel.
-2. Choose **From** and **Through**. Use the existing text-selection menu’s
-   **Bookmark** action, or the panel’s **Bookmark** list.
-3. Review the effective start. A bookmark in a different chapter requires
-   explicitly updating From or choosing Chapter beginning.
-4. Choose **Open quiet document**, then start Read aloud from Edge’s menu.
+2. Choose **From** and **Through** from the same EPUB Contents entries used by
+   the reader. The final chapter is included in full. Nested chapters and
+   chapters sharing one XHTML file retain their own boundaries.
+3. A valid saved **Bookmark** is selected automatically on a fresh opening,
+   with a read-only chapter and text preview. Choose **Chapter beginning** if
+   preferred. A Bookmark anywhere inside the range can be the start; preceding
+   content is skipped. An outside-range Bookmark stays selected with a clear
+   validation message until you adjust the chapters or use Chapter beginning.
+   The panel has no Bookmark button or paragraph picker. Save a Bookmark using
+   the reader's text-selection menu or the listening document instead.
+4. Choose **Open listening view**, then start Read aloud from Edge’s menu.
 5. Pause Edge before saving another bookmark. Each prose paragraph has a
    text-sized bookmark at the left edge in the whitespace directly above it.
    Tap the icon to save the following paragraph as the next listening start.
@@ -48,7 +54,7 @@ The four selected features now use the original Flow application and library:
   listening setup does not clear the book’s annotations or reading progress.
 - Selected text maps through the source paragraph sequence and exact text, so
   identical paragraphs do not silently resolve to the first matching phrase.
-- Quick bookmark icons and the setup picker use prose paragraphs, including
+- Quick bookmark icons use prose paragraphs, including
   list items and quoted prose. The quiet document's Tools list retains the
   original full set of manual choices. Headings, captions, table cells, preformatted
   blocks and generated image descriptions do not receive quick icons. Filtering
@@ -59,7 +65,32 @@ The four selected features now use the original Flow application and library:
   spine content in its original order. Earlier prose is removed. Optional
   generated image descriptions are omitted; printed captions are retained.
 
-## Bookmark verification on 1 November 2026
+## Chapter-range verification on 1 November 2026
+
+- Chapter choices use the existing EPUB Navigation parser. TOC labels,
+  hierarchy and fragments remain distinct from the unchanged source sections
+  and paragraph IDs. Linked parent entries include their subtree; aliases do
+  not duplicate narration. Legacy whole-file plans remain whole-file plans,
+  with an explicit option when their boundaries differ from a TOC chapter.
+- Fresh setup defaults affect only the local draft. They do not create a plan
+  revision or interfere with Undo. An explicit start choice survives edits and
+  returns from the current preview; a later fresh opening defaults again.
+- All 21 browser document groups, 17 draft-state groups and 15 storage groups
+  passed. The reader production build passed lint, TypeScript, compilation and
+  all 30 localized pages. These tests do not measure native speech.
+- The Android 16 / API 36 Chrome emulator imported Alice into the locally built
+  app, selected chapters III through IV using native chapter selectors, and
+  opened the quiet document. No saved Bookmark disabled that start option.
+- Saving paragraph two, saving paragraph one temporarily, then Undo restored
+  paragraph two. Android Back returned to the existing setup with that preview
+  and the III–IV range. Choosing Chapter beginning, closing the panel and opening
+  it again selected Bookmark automatically. The next quiet launch began at
+  paragraph two, with the context heading retained and earlier prose omitted.
+- Current-run screenshots are local artifacts under
+  `.tmp/listening-range-implementation-20261101/`. Native Android Edge narration,
+  background playback and installed-PWA behavior were not retested in this pass.
+
+## Earlier Bookmark verification on 1 November 2026
 
 - The browser regression harness passed all 17 groups through the browser at
   `http://127.0.0.1:7141/`. The new group checks prose-only bookmark choices,

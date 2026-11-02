@@ -59,9 +59,11 @@ typography and reading progress, and adds listening to the ebook workflow.
 
 1. Import an EPUB into the original library. Choose **Listen** on its cover or
    in the reader header.
-2. Choose **From** and **Through**. Start at the chapter beginning or save a
-   paragraph using the text-selection menu or accessible paragraph picker.
-3. Choose **Open quiet document**, close its tools, and start **Read aloud** from
+2. Choose **From** and **Through** from the EPUB's Contents chapters. A valid
+   saved **Bookmark** is selected automatically as the start, with a read-only
+   preview; you can choose **Chapter beginning** instead. Save Bookmarks while
+   reading or in the listening document, not in the range panel.
+3. Choose **Open listening view**, close its tools, and start **Read aloud** from
    Microsoft Edge's menu. On desktop, **Ctrl+Shift+U** starts Read aloud.
 4. Pause Edge before saving another paragraph through **Session / Tools**. The
    current document stays unchanged; the saved paragraph applies to a new
@@ -83,7 +85,7 @@ The document regression fixture is generated with
 
 Open [Flow Listening v2](https://flow-listening-v2.vercel.app) in Microsoft Edge on
 your phone, then use Edge's **Add to Home screen** or install option. Import your EPUB
-on that phone and follow the same cover → Listen → Open quiet document flow.
+on that phone and follow the same cover → Listen → Open listening view flow.
 If the installed view hides Read aloud, open the same quiet-document URL in
 Edge's browser window using the same profile. Books and saved starts belong to
 the device, browser profile and site address; they do not transfer automatically

@@ -9,4 +9,5 @@
 .env*
 **/.env*
 design/
+design-qa.md
 docs/

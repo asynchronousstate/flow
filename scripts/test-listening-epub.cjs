@@ -6,7 +6,9 @@
  * `--write` refreshes that fixture without launching a browser or server.
  */
 /* global JSZip, prepareListeningBook, getListeningParagraphs,
-  getBookmarkParagraphs, markerFromRange, buildQuietSession, sameSourceHref */
+  getBookmarkParagraphs, markerFromRange, buildQuietSession, sameSourceHref,
+  getListeningChapters, resolveListeningChapter, chapterForBookmark,
+  validateListeningRange, validateListeningBookmark, isBookmarkInListeningRange */
 const assert = require('node:assert/strict')
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
@@ -41,7 +43,7 @@ assert(
 
 const converter = fs
   .readFileSync(path.join(root, 'apps/reader/src/listening/epub.ts'), 'utf8')
-  .replace("import JSZip from 'jszip'", '')
+  .replace(/^import[\s\S]*?from ['"][^'"]+['"]\r?\n/gm, '')
   .replace(/export /g, '')
 const compiled = ts.transpileModule(converter, {
   compilerOptions: {
@@ -49,6 +51,51 @@ const compiled = ts.transpileModule(converter, {
     module: ts.ModuleKind.None,
   },
 }).outputText
+const chaptersSource = fs
+  .readFileSync(
+    path.join(root, 'apps/reader/src/listening/chapters.ts'),
+    'utf8',
+  )
+  .replace(/^import[\s\S]*?from ['"][^'"]+['"]\r?\n/gm, '')
+  .replace(/export /g, '')
+const compiledChapters = ts.transpileModule(chaptersSource, {
+  compilerOptions: {
+    target: ts.ScriptTarget.ES2020,
+    module: ts.ModuleKind.None,
+  },
+}).outputText
+// Exercise the identical Navigation parser and its actual DOM helpers used by
+// the EPUB reader, without a second navigation implementation in the fixture.
+const coreSource = fs.readFileSync(
+  path.join(root, 'packages/epubjs/src/utils/core.js'),
+  'utf8',
+)
+const coreAst = ts.createSourceFile(
+  'core.js',
+  coreSource,
+  ts.ScriptTarget.ES2020,
+  true,
+  ts.ScriptKind.JS,
+)
+const navigationHelpers = new Set([
+  'qs',
+  'qsa',
+  'querySelectorByType',
+  'filterChildren',
+  'getParentByTagName',
+])
+const compiledNavigationHelpers = coreAst.statements
+  .filter(
+    (statement) =>
+      ts.isFunctionDeclaration(statement) &&
+      navigationHelpers.has(statement.name.text),
+  )
+  .map((statement) => statement.getText(coreAst).replace(/^export /, ''))
+  .join('\n')
+const compiledNavigation = fs
+  .readFileSync(path.join(root, 'packages/epubjs/src/navigation.js'), 'utf8')
+  .replace(/^import[\s\S]*?from ['"][^'"]+['"]\r?\n/gm, '')
+  .replace('export default Navigation', '')
 const documentSource = fs
   .readFileSync(
     path.join(root, 'apps/reader/src/listening/document.ts'),
@@ -664,6 +711,332 @@ async function verify(aliceBase64) {
       aliceSession.sections[2].sourceHref === book.sections[4].sourceHref,
     'Alice II–IV range changed',
   )
+
+  // Canonical EPUB TOC chapters are views over stable source sections. The
+  // parent and first child deliberately alias the same fragment: occurrence
+  // IDs must distinguish their different inclusive Through endpoints.
+  const logicalZip = new JSZip()
+  logicalZip.file(
+    'META-INF/container.xml',
+    '<container><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>',
+  )
+  logicalZip.file(
+    'OPS/book.opf',
+    '<package><metadata><title>Logical chapters</title><language>en</language></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/><item id="b" href="b.xhtml" media-type="application/xhtml+xml"/><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/><itemref idref="b"/><itemref idref="c"/></spine></package>',
+  )
+  logicalZip.file(
+    'OPS/nav.xhtml',
+    '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="a.xhtml#one">Part Alpha</a><ol><li><a href="a.xhtml#one">Chapter One Canonical</a></li><li><a href="a.xhtml#two">Chapter Two Canonical</a></li></ol></li><li><a href="a.xhtml#three">Chapter Three Canonical</a></li><li><a href="b.xhtml">Chapter Four Canonical</a></li><li><a href="a.xhtml#two">Chapter Two Alias</a></li><li><a href="a.xhtml#missing">Broken Chapter</a></li><li><span>Extra Group</span><ol><li><a href="c.xhtml">Chapter Five Canonical</a></li></ol></li><li><a href="https://outside.invalid/book">External</a></li></ol></nav></body></html>',
+  )
+  logicalZip.file(
+    'OPS/a.xhtml',
+    '<html xmlns="http://www.w3.org/1999/xhtml"><body><div id="part"><h1>Visible book heading</h1><p>Intro before Chapter One.</p><h2 id="one">Heading One</h2><p id="p-one">One first.</p><p>One second <em>styled</em>.</p><h2 id="two">Heading Two</h2><p id="p-two">Two only.</p><h2 id="three">Heading Three</h2><p id="p-three">Three only.</p></div></body></html>',
+  )
+  logicalZip.file(
+    'OPS/b.xhtml',
+    '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Four visible</h1><p>Four only.</p></body></html>',
+  )
+  logicalZip.file(
+    'OPS/c.xhtml',
+    '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Five visible</h1><p>Five only.</p></body></html>',
+  )
+  const logical = await prepareListeningBook(
+    await logicalZip.generateAsync({ type: 'arraybuffer' }),
+  )
+  const choices = getListeningChapters(logical)
+  const choice = (label) => choices.find((entry) => entry.label === label)
+  const part = choice('Part Alpha')
+  const one = choice('Chapter One Canonical')
+  const two = choice('Chapter Two Canonical')
+  const three = choice('Chapter Three Canonical')
+  const four = choice('Chapter Four Canonical')
+  check(
+    logical.sections.length === 3 &&
+      logical.sections[0].id === 'flow-section-0',
+    'TOC conversion split or renumbered source sections',
+  )
+  check(
+    one.href === 'OPS/a.xhtml#one' &&
+      one.depth === 1 &&
+      one.parentId === part.id &&
+      part.id !== one.id,
+    'Canonical TOC labels, hierarchy, fragments, or alias occurrence IDs changed',
+  )
+  check(
+    choice('Broken Chapter').disabled &&
+      choice('External').disabled &&
+      choice('Extra Group').disabled &&
+      !choice('Chapter Five Canonical').disabled,
+    'Missing anchors, external links, or unlinked TOC groups became selectable',
+  )
+  const chapterRecord = {
+    bookId: 'logical',
+    fingerprint: 'test',
+    from: one.id,
+    through: two.id,
+    startAt: 'chapter',
+    updatedAt: 1,
+  }
+  const chapterText = (session) =>
+    new DOMParser().parseFromString(
+      session.sections.map((entry) => entry.html).join(''),
+      'text/html',
+    ).body.textContent
+  const oneThroughTwo = buildQuietSession(logical, chapterRecord)
+  const oneTwoText = chapterText(oneThroughTwo)
+  check(
+    oneTwoText.includes('One first.') &&
+      oneTwoText.includes('Two only.') &&
+      !oneTwoText.includes('Intro before') &&
+      !oneTwoText.includes('Three only.') &&
+      !oneTwoText.includes('Four only.'),
+    'Inclusive logical chapter endpoints leaked other chapters in the same source file',
+  )
+  const parentText = chapterText(
+    buildQuietSession(logical, {
+      ...chapterRecord,
+      from: part.id,
+      through: part.id,
+    }),
+  )
+  check(
+    parentText.includes('One first.') &&
+      parentText.includes('Two only.') &&
+      !parentText.includes('Three only.'),
+    'Selecting a linked TOC parent did not include precisely its subtree',
+  )
+  const onlyOneText = chapterText(
+    buildQuietSession(logical, { ...chapterRecord, through: one.id }),
+  )
+  check(
+    onlyOneText.includes('One first.') && !onlyOneText.includes('Two only.'),
+    'A child alias inherited the parent’s longer Through endpoint',
+  )
+  const acrossFilesText = chapterText(
+    buildQuietSession(logical, {
+      ...chapterRecord,
+      from: two.id,
+      through: four.id,
+    }),
+  )
+  check(
+    acrossFilesText.includes('Two only.') &&
+      acrossFilesText.includes('Three only.') &&
+      acrossFilesText.includes('Four only.') &&
+      !acrossFilesText.includes('Five only.'),
+    'Logical range failed to continue through the final chapter across source files',
+  )
+  check(
+    (oneTwoText.match(/Two only\./g) || []).length === 1,
+    'A TOC alias duplicated narrated prose',
+  )
+  const logicalIds = Array.from(
+    new DOMParser()
+      .parseFromString(
+        oneThroughTwo.sections.map((entry) => entry.html).join(''),
+        'text/html',
+      )
+      .querySelectorAll('[id]'),
+  ).map((element) => element.id)
+  check(
+    new Set(logicalIds).size === logicalIds.length,
+    'Chapter slicing duplicated cloned ancestor IDs',
+  )
+  const twoParagraph = getListeningParagraphs(logical.sections[0]).find(
+    (paragraph) => paragraph.text === 'Two only.',
+  )
+  const logicalMarker = {
+    sourceHref: 'OPS/a.xhtml',
+    blockId: twoParagraph.blockId,
+    text: twoParagraph.text,
+    savedAt: 1,
+  }
+  check(
+    chapterForBookmark(logical, logicalMarker).id === two.id &&
+      !validateListeningBookmark(logical, logicalMarker),
+    'Exact bookmark did not resolve to its deepest canonical chapter',
+  )
+  check(
+    isBookmarkInListeningRange(logical, logicalMarker, one.id, three.id),
+    'A bookmark after From but inside the inclusive range was rejected',
+  )
+  const laterStart = buildQuietSession(logical, {
+    ...chapterRecord,
+    through: three.id,
+    startAt: 'marker',
+    marker: logicalMarker,
+  })
+  check(
+    chapterText(laterStart).includes('Two only.') &&
+      chapterText(laterStart).includes('Three only.') &&
+      !chapterText(laterStart).includes('One first.'),
+    'Saved bookmark inside the range did not skip earlier chapters',
+  )
+  check(
+    getListeningParagraphs(laterStart.sections[0])[0].blockId ===
+      logicalMarker.blockId &&
+      laterStart.sections[0].html.includes('Heading Two'),
+    'Logical bookmark trim lost stable locators or nearest chapter context',
+  )
+  check(
+    !isBookmarkInListeningRange(logical, logicalMarker, three.id, four.id),
+    'An out-of-range bookmark was treated as inside',
+  )
+  check(
+    validateListeningRange(logical, { from: three.id, through: one.id }) &&
+      validateListeningRange(logical, {
+        from: one.id,
+        through: choice('Broken Chapter').id,
+      }),
+    'Invalid logical order or missing anchor passed range validation',
+  )
+  const legacyLogical = buildQuietSession(logical, {
+    ...chapterRecord,
+    from: 'OPS/a.xhtml',
+    through: 'OPS/a.xhtml',
+  })
+  check(
+    legacyLogical.sections[0].html === logical.sections[0].html &&
+      resolveListeningChapter(logical, 'OPS/a.xhtml').fallback,
+    'Legacy whole-file plans were silently shortened to TOC fragments',
+  )
+  check(
+    validateListeningRange(logical, {
+      from: '../../OPS/a.xhtml',
+      through: two.id,
+    }) &&
+      validateListeningRange(logical, {
+        from: '../../OPS/a.xhtml#one',
+        through: two.id,
+      }) &&
+      validateListeningBookmark(logical, {
+        ...logicalMarker,
+        sourceHref: '../../OPS/a.xhtml',
+      }),
+    'Unresolved parent traversal was accepted by chapter or bookmark resolution',
+  )
+  check(
+    logical.sections[0].html.includes('Intro before Chapter One.') &&
+      logical.sections[0].html.includes('Three only.'),
+    'Logical slicing mutated original source content',
+  )
+  const bareBook = {
+    title: 'Bare source',
+    author: '',
+    language: 'en',
+    sections: [
+      {
+        id: 'bare',
+        sourceHref: 'bare.xhtml',
+        title: 'Bare',
+        html: '<h1>Context heading</h1><p><span data-listening-paragraph="bare-first">Earlier.</span></p><p><span data-listening-paragraph="bare-second">Keep this paragraph.</span></p>',
+      },
+    ],
+  }
+  const bareSession = buildQuietSession(bareBook, {
+    ...chapterRecord,
+    from: 'bare.xhtml',
+    through: 'bare.xhtml',
+    startAt: 'marker',
+    marker: {
+      sourceHref: 'bare.xhtml',
+      blockId: 'bare-second',
+      text: 'Keep this paragraph.',
+      savedAt: 1,
+    },
+  })
+  const bareDoc = new DOMParser().parseFromString(
+    bareSession.sections[0].html,
+    'text/html',
+  )
+  check(
+    bareDoc.body.firstElementChild.tagName === 'H1' &&
+      !bareDoc.querySelector('p h1') &&
+      getListeningParagraphs(bareSession.sections[0])[0].text ===
+        'Keep this paragraph.',
+    'Context heading was nested inside a source paragraph without an outer wrapper',
+  )
+  check(
+    getListeningChapters(cleaned).every(
+      (entry) => entry.fallback && !entry.disabled,
+    ),
+    'EPUB without a TOC did not provide explicit section fallbacks',
+  )
+
+  // Start/end anchors within prose must preserve exactly the selected text,
+  // without advertising a truncated paragraph as a valid full-source bookmark.
+  const fragmentZip = new JSZip()
+  fragmentZip.file(
+    'META-INF/container.xml',
+    '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>',
+  )
+  fragmentZip.file(
+    'book.opf',
+    '<package><metadata><title>Fragments</title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/></spine></package>',
+  )
+  fragmentZip.file(
+    'nav.xhtml',
+    '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="a.xhtml#head">Before inline</a></li><li><a href="a.xhtml#inline">Inline</a></li><li><a href="a.xhtml#container">Container</a></li><li><a href="a.xhtml#last">Last</a></li></ol></nav></body></html>',
+  )
+  fragmentZip.file(
+    'a.xhtml',
+    '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="head">Fragment tests</h1><p id="outer">Before <span id="inline">inside <em>start</em></span> after.</p><div id="container"><h2>Container chapter</h2><p>Container content.</p></div><h2 id="last">Last chapter</h2><p>Last content.</p></body></html>',
+  )
+  const fragments = await prepareListeningBook(
+    await fragmentZip.generateAsync({ type: 'arraybuffer' }),
+  )
+  const fragmentChoices = getListeningChapters(fragments)
+  const fragmentChoice = (label) =>
+    fragmentChoices.find((entry) => entry.label === label)
+  const fragmentSession = (label) =>
+    buildQuietSession(fragments, {
+      ...chapterRecord,
+      from: fragmentChoice(label).id,
+      through: fragmentChoice(label).id,
+    })
+  const inlineSession = fragmentSession('Inline')
+  check(
+    norm(chapterText(inlineSession)) === 'inside start after.' &&
+      !getListeningParagraphs(inlineSession.sections[0]).length,
+    'Inline start boundary changed prose or exposed a partial-source bookmark',
+  )
+  const beforeInline = fragmentSession('Before inline')
+  check(
+    norm(chapterText(beforeInline)) === 'Fragment testsBefore' &&
+      getBookmarkParagraphs(beforeInline.sections[0]).length === 0,
+    'Inline end boundary leaked later text or exposed its truncated paragraph',
+  )
+  const containerSession = fragmentSession('Container')
+  check(
+    norm(chapterText(containerSession)) ===
+      'Container chapterContainer content.' &&
+      containerSession.sections[0].html.includes(
+        'flow-section-0-ref-container',
+      ),
+    'Container anchor did not retain its hierarchy or exact endpoint',
+  )
+
+  // EPUB2 NCX uses the reader’s same parser and retains nested labels/anchors.
+  fragmentZip.file(
+    'book.opf',
+    '<package><metadata><title>NCX</title></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"><itemref idref="a"/></spine></package>',
+  )
+  fragmentZip.remove('nav.xhtml')
+  fragmentZip.file(
+    'toc.ncx',
+    '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap><navPoint id="parent"><navLabel><text>NCX Part</text></navLabel><content src="a.xhtml#head"/><navPoint id="child"><navLabel><text>NCX Inline</text></navLabel><content src="a.xhtml#inline"/></navPoint></navPoint><navPoint id="last"><navLabel><text>NCX Container</text></navLabel><content src="a.xhtml#container"/></navPoint></navMap></ncx>',
+  )
+  const ncxBook = await prepareListeningBook(
+    await fragmentZip.generateAsync({ type: 'arraybuffer' }),
+  )
+  const ncxChapters = getListeningChapters(ncxBook)
+  check(
+    ncxChapters[0].label === 'NCX Part' &&
+      ncxChapters[1].label === 'NCX Inline' &&
+      ncxChapters[1].depth === 1 &&
+      ncxChapters[1].href === 'a.xhtml#inline',
+    'NCX chapter labels, nesting, or fragment links changed',
+  )
   let rejected = false
   try {
     await prepareListeningBook(new Uint8Array([0, 1, 2]).buffer)
@@ -692,6 +1065,10 @@ async function verify(aliceBase64) {
       'Stale markers and invalid range errors',
       'Safe and unambiguous source paths',
       'Alice saved-paragraph II–IV continuity',
+      'Canonical EPUB3/NCX chapter labels, hierarchy, and exact fragment links',
+      'Inclusive logical chapter ranges, nested parent subtrees, aliases, and missing anchors',
+      'Exact in-range bookmarks, stable source IDs, and legacy whole-file sessions',
+      'Inline/container boundary slicing without duplicate IDs or partial-source bookmarks',
     ],
   }
 }
@@ -701,7 +1078,7 @@ const temp =
     ? path.join(root, '.tmp', 'listening-workflow-tests')
     : fs.mkdtempSync(path.join(os.tmpdir(), 'flow-listening-test-'))
 fs.mkdirSync(temp, { recursive: true })
-const script = `${jszip}\n${compiled}\n${compiledDocument}\n(${verify.toString()})(${JSON.stringify(
+const script = `${jszip}\n${compiledNavigationHelpers}\n${compiledNavigation}\n${compiledChapters}\nconst sourceId = listeningSourceId; const resolveReference = resolveListeningReference;\n${compiled}\n${compiledDocument}\n(${verify.toString()})(${JSON.stringify(
   alice,
 )}).then(result => {
   document.getElementById('result').textContent = JSON.stringify(result, null, 2)

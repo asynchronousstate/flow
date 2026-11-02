@@ -12,6 +12,12 @@ async function build() {
   const publicDir = standalone
     ? path.join(root, 'public')
     : path.resolve(root, '../reader/public')
+  const epubjs = standalone
+    ? path.join(root, 'vendor/epubjs')
+    : path.resolve(root, '../../packages/epubjs')
+  const navigation = standalone
+    ? path.join(epubjs, 'navigation.js')
+    : path.join(epubjs, 'src/navigation.js')
   const dist = path.join(root, 'dist')
   let esbuild
   try {
@@ -29,6 +35,10 @@ async function build() {
     ? path.join(root, 'LICENSE')
     : path.resolve(root, '../../LICENSE')
   fs.copyFileSync(license, path.join(dist, 'LICENSE.txt'))
+  fs.copyFileSync(
+    path.join(epubjs, 'LICENSE'),
+    path.join(dist, 'LICENSE-epubjs.txt'),
+  )
   await esbuild.build({
     entryPoints: [path.join(root, 'src/main.tsx')],
     bundle: true,
@@ -37,11 +47,23 @@ async function build() {
     jsx: 'automatic',
     define: { 'process.env.NODE_ENV': '"production"' },
     outfile: path.join(dist, 'assets/app.js'),
-    nodePaths: [path.resolve(root, '../reader/node_modules')],
+    nodePaths: [
+      ...(process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean),
+      ...(standalone
+        ? [path.join(root, 'node_modules')]
+        : [
+            path.resolve(root, '../reader/node_modules'),
+            path.join(epubjs, 'node_modules'),
+          ]),
+    ],
     plugins: [
       {
         name: 'shared-listener',
         setup(build) {
+          build.onResolve(
+            { filter: /^@flow\/epubjs\/src\/navigation$/ },
+            () => ({ path: navigation }),
+          )
           build.onResolve({ filter: /^@flow\/listening\// }, (args) => {
             const name = args.path.replace('@flow/listening/', '')
             return {
@@ -73,17 +95,30 @@ async function build() {
       else add(name, fs.readFileSync(file))
     }
   }
-  for (const file of [
-    'package.json',
-    'build.cjs',
-    'sw-template.js',
-    'README.md',
-  ])
+  for (const file of ['build.cjs', 'sw-template.js', 'README.md'])
     add(file, fs.readFileSync(path.join(root, file)))
+  const sourcePackage = JSON.parse(
+    fs.readFileSync(path.join(root, 'package.json'), 'utf8'),
+  )
+  sourcePackage.dependencies = {
+    ...sourcePackage.dependencies,
+    '@xmldom/xmldom': '0.7.13',
+  }
+  add('package.json', JSON.stringify(sourcePackage, null, 2) + '\n')
   add('LICENSE', fs.readFileSync(license))
   addDirectory(path.join(root, 'src'), 'src')
   addDirectory(path.join(root, 'public'), 'public')
   addDirectory(shared, 'shared')
+  if (standalone) addDirectory(epubjs, 'vendor/epubjs')
+  else {
+    for (const [source, target] of [
+      ['src/navigation.js', 'navigation.js'],
+      ['src/utils/core.js', 'utils/core.js'],
+      ['types/navigation.d.ts', 'types/navigation.d.ts'],
+      ['LICENSE', 'LICENSE'],
+    ])
+      add('vendor/epubjs/' + target, fs.readFileSync(path.join(epubjs, source)))
+  }
   if (!standalone) {
     for (const name of ['icons', 'samples'])
       addDirectory(path.join(publicDir, name), 'public/' + name)
@@ -91,7 +126,11 @@ async function build() {
   const config = JSON.parse(
     fs.readFileSync(path.join(root, 'tsconfig.json'), 'utf8'),
   )
-  config.compilerOptions.paths = { '@flow/listening/*': ['shared/*'] }
+  config.compilerOptions.paths = {
+    '@flow/listening/*': ['shared/*'],
+    '@flow/epubjs/src/navigation': ['vendor/epubjs/types/navigation.d.ts'],
+    '@flow/epubjs/types/navigation': ['vendor/epubjs/types/navigation.d.ts'],
+  }
   add('tsconfig.json', JSON.stringify(config, null, 2) + '\n')
   fs.writeFileSync(
     path.join(dist, 'source.zip'),

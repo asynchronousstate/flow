@@ -1,5 +1,6 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useRouter } from 'next/router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import FocusLock from 'react-focus-lock'
 import { MdBookmarkBorder, MdClose, MdHeadset } from 'react-icons/md'
@@ -7,23 +8,27 @@ import { MdBookmarkBorder, MdClose, MdHeadset } from 'react-icons/md'
 import { db } from '../../db'
 import { useAction, useMobile } from '../../hooks'
 import {
-  buildQuietSession,
-  getBookmarkParagraphs,
-  sameSourceHref,
-} from '../../listening/document'
+  chapterForBookmark,
+  getListeningChapters,
+  isBookmarkInListeningRange,
+  resolveListeningChapter,
+  validateListeningBookmark,
+  validateListeningRange,
+} from '../../listening/chapters'
+import type { ListeningChapter } from '../../listening/chapters'
 import { ListeningBook } from '../../listening/epub'
 import {
   IntegratedListeningRecord,
-  ListeningMarker,
   createQuietLaunch,
   loadLibraryListeningBook,
   resetLibraryListeningBook,
-  saveLibraryMarker,
   updateListeningRecord,
 } from '../../listening/integrated'
 import {
   AppliedListeningPlan,
   captureListeningPlan,
+  defaultListeningStart,
+  displayListeningChapterReference,
   reconcileListeningPlan,
 } from '../../listening/plan'
 import { reader, useReaderSnapshot } from '../../models'
@@ -78,13 +83,11 @@ export function ListeningView({ className }: PaneViewProps) {
           <ListeningBookPanel
             key={focusedBookTab.book.id}
             bookId={focusedBookTab.book.id}
+            visible={visible}
           />
         ) : (
           <div className="flow-listening-body">
-            <p>
-              Open a book, then choose the chapters and bookmark where listening
-              starts.
-            </p>
+            <p>Open a book, then choose the chapters to listen to.</p>
             <p className="flow-listening-hint">
               The library’s Listen action opens the book here.
             </p>
@@ -95,9 +98,14 @@ export function ListeningView({ className }: PaneViewProps) {
   )
 }
 
-function ListeningBookPanel({ bookId }: { bookId: string }) {
-  const { focusedBookTab } = useReaderSnapshot()
-  const currentHref = focusedBookTab?.currentHref
+function ListeningBookPanel({
+  bookId,
+  visible,
+}: {
+  bookId: string
+  visible: boolean
+}) {
+  const router = useRouter()
   const stored = useLiveQuery(() => db?.listening.get(bookId), [bookId])
   const [book, setBook] = useState<ListeningBook>()
   const [draft, setDraft] = useState<IntegratedListeningRecord>()
@@ -105,14 +113,20 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
   const [bookChanged, setBookChanged] = useState(false)
   const [retry, setRetry] = useState(0)
   const [saving, setSaving] = useState(false)
-  const [savingMarker, setSavingMarker] = useState(false)
   const [fallbackHref, setFallbackHref] = useState('')
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [previewHref, setPreviewHref] = useState('')
-  const [paragraphLimit, setParagraphLimit] = useState(20)
   const [notice, setNotice] = useState('')
+  const [opening, setOpening] = useState(0)
   const appliedPlan = useRef<AppliedListeningPlan>()
+  const manualStartChoice = useRef(false)
+  const entry = useRef({ visible: false, first: true })
+  const pendingDefault = useRef(false)
   const alive = useRef(true)
+  const resumeSession =
+    router.query.book === bookId &&
+    router.query.listening === '1' &&
+    typeof router.query.session === 'string'
+      ? router.query.session
+      : undefined
 
   useEffect(() => {
     alive.current = true
@@ -122,34 +136,71 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
   }, [])
 
   useEffect(() => {
+    if (!router.isReady) return
+    if (visible && !entry.current.visible) {
+      // This component remains mounted behind other reader panels. Default
+      // only on an actual entry, never on a rerender or a tab's Back action.
+      const resuming = entry.current.first && !!resumeSession
+      pendingDefault.current = !resuming
+      if (!resuming) manualStartChoice.current = false
+      entry.current.first = false
+      setOpening((value) => value + 1)
+    }
+    entry.current.visible = visible
+  }, [resumeSession, router.isReady, visible])
+
+  useEffect(() => {
+    if (!router.isReady) return
     let cancelled = false
     setBook(undefined)
     setDraft(undefined)
     setError('')
     setBookChanged(false)
-    loadLibraryListeningBook(bookId)
-      .then((loaded) => {
-        if (cancelled) return
-        appliedPlan.current = captureListeningPlan(loaded.record)
-        setBook(loaded.book)
-        setDraft(loaded.record)
-      })
-      .catch((reason) => {
-        if (!cancelled) {
-          setError(errorMessage(reason))
-          setBookChanged(reason?.code === 'BOOK_CHANGED')
-        }
-      })
+    async function load() {
+      const loaded = await loadLibraryListeningBook(bookId)
+      // The EPUB fingerprint was just verified above. Read only launch
+      // metadata to preserve the preview's explicit mode when returning.
+      const launch = resumeSession
+        ? await db?.listeningSessions.get(resumeSession)
+        : undefined
+      if (cancelled) return
+      const resuming =
+        launch?.bookId === bookId &&
+        launch.fingerprint === loaded.record.fingerprint
+      appliedPlan.current = captureListeningPlan(loaded.record)
+      if (resuming) manualStartChoice.current = true
+      setBook(loaded.book)
+      setDraft(
+        resuming
+          ? { ...loaded.record, startAt: launch.plan.startAt }
+          : loaded.record,
+      )
+    }
+    load().catch((reason) => {
+      if (!cancelled) {
+        setError(errorMessage(reason))
+        setBookChanged(reason?.code === 'BOOK_CHANGED')
+      }
+    })
     return () => {
       cancelled = true
     }
-  }, [bookId, retry])
+  }, [bookId, resumeSession, retry, router.isReady])
 
-  // Another quiet-document tab may save or undo a bookmark while this form is
-  // open. Follow plan revisions: Undo can restore an older savedAt or no marker.
+  // Keep a manually chosen start mode and range while the saved preview follows
+  // newer bookmarks/Undo. A removed or stale Bookmark cannot remain active.
   useEffect(() => {
-    if (!stored || !draft) return
-    const next = reconcileListeningPlan(draft, stored, appliedPlan.current)
+    if (!stored || !draft || !book) return
+    if (
+      appliedPlan.current &&
+      stored.updatedAt <= appliedPlan.current.updatedAt
+    )
+      return
+    const next = reconcileListeningPlan(draft, stored, appliedPlan.current, {
+      preserveStartChoice: manualStartChoice.current,
+      bookmarkAvailable:
+        !!stored.marker && !validateListeningBookmark(book, stored.marker),
+    })
     appliedPlan.current = next.applied
     if (!next.changed) return
     setDraft((current) =>
@@ -157,99 +208,137 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
         ? { ...current, marker: next.draft.marker, startAt: next.draft.startAt }
         : current,
     )
-    setNotice(
-      next.draft.startAt === 'marker'
-        ? 'Bookmark updated. Your chapter range is unchanged.'
-        : 'Listening start updated. Your chapter range is unchanged.',
-    )
+    setNotice('Saved Bookmark updated. Your chapter range is unchanged.')
     setFallbackHref('')
-  }, [draft, stored])
+  }, [book, draft, stored])
 
-  const sections = book?.sections ?? []
-  const fromIndex = sections.findIndex(
-    (section) => section.sourceHref === draft?.from,
-  )
-  const throughIndex = sections.findIndex(
-    (section) => section.sourceHref === draft?.through,
-  )
-  const markerIndex = sections.findIndex(
-    (section) =>
-      !!draft?.marker &&
-      sameSourceHref(section.sourceHref, draft.marker.sourceHref),
-  )
-  const markerNeedsFrom =
-    draft?.startAt === 'marker' && markerIndex >= 0 && markerIndex !== fromIndex
-  const markerOutside = markerIndex < fromIndex || markerIndex > throughIndex
-  const fromSection = sections[fromIndex]
-  const throughSection = sections[throughIndex]
-  const markerSection = sections[markerIndex]
+  const bookmark = useMemo(() => {
+    if (!book || !draft?.marker) return { available: false, chapter: undefined }
+    try {
+      return {
+        available: true,
+        chapter: chapterForBookmark(book, draft.marker),
+      }
+    } catch {
+      return { available: false, chapter: undefined }
+    }
+  }, [book, draft?.marker])
 
+  useEffect(() => {
+    if (!book || !draft) return
+    const freshOpening = visible && pendingDefault.current
+    if (freshOpening) pendingDefault.current = false
+    const next = defaultListeningStart(draft, bookmark.available, freshOpening)
+    if (freshOpening || next !== draft)
+      setDraft((current) => {
+        if (!current) return current
+        // A live-query update can already be queued in this same effect flush.
+        // Default against that latest marker, not the previous render's preview.
+        const available =
+          current.marker === draft.marker
+            ? bookmark.available
+            : !!current.marker &&
+              !validateListeningBookmark(book, current.marker)
+        return defaultListeningStart(current, available, freshOpening)
+      })
+  }, [book, bookmark.available, draft, opening, visible])
+
+  const chapters = useMemo(
+    () => (book ? getListeningChapters(book) : []),
+    [book],
+  )
+  const chapterChoices = useMemo(() => {
+    const options: Pick<
+      ListeningChapter,
+      'id' | 'label' | 'depth' | 'disabled' | 'reason'
+    >[] = [...chapters]
+    const values = { from: draft?.from || '', through: draft?.through || '' }
+    if (!book || !draft) return { options, ...values }
+    for (const edge of ['from', 'through'] as const) {
+      const reference = draft[edge]
+      if (options.some((chapter) => chapter.id === reference)) continue
+      try {
+        // Legacy whole-file ranges stay whole-file. Never silently substitute
+        // the first fragment of a source file containing several TOC chapters.
+        const resolved = resolveListeningChapter(book, reference, edge)
+        values[edge] = displayListeningChapterReference(
+          reference,
+          resolved,
+          chapters,
+        )
+        if (values[edge] !== reference) continue
+        const spansFragments =
+          resolved.fallback &&
+          chapters.some(
+            (chapter) =>
+              chapter.sourceHref === resolved.sourceHref &&
+              chapter.href.includes('#'),
+          )
+        options.push({
+          ...resolved,
+          id: reference,
+          label: spansFragments
+            ? `${resolved.label} (entire section)`
+            : resolved.label,
+        })
+      } catch (reason) {
+        options.push({
+          id: reference,
+          label: 'Saved chapter unavailable',
+          depth: 0,
+          disabled: true,
+          reason: errorMessage(reason),
+        })
+      }
+    }
+    return { options, ...values }
+  }, [book, chapters, draft])
+  const chapterOptions = chapterChoices.options
+
+  const startAt = bookmark.available ? draft?.startAt : 'chapter'
+  const fromChapter = chapterOptions.find(
+    (chapter) => chapter.id === chapterChoices.from,
+  )
+  const throughChapter = chapterOptions.find(
+    (chapter) => chapter.id === chapterChoices.through,
+  )
   const validation = useMemo(() => {
     if (!book || !draft) return ''
+    const rangeError = validateListeningRange(book, draft)
+    if (rangeError) return rangeError
     try {
-      buildQuietSession(book, draft)
+      if (
+        startAt === 'marker' &&
+        draft.marker &&
+        !isBookmarkInListeningRange(
+          book,
+          draft.marker,
+          draft.from,
+          draft.through,
+        )
+      )
+        return `Your Bookmark is in ${
+          bookmark.chapter?.label || 'another chapter'
+        }, outside this range. Include that chapter, or choose Chapter beginning.`
       return ''
     } catch (reason) {
       return errorMessage(reason)
     }
-  }, [book, draft])
-
-  const previewSection =
-    sections.find((section) => section.sourceHref === previewHref) ??
-    fromSection
-  const paragraphs = useMemo(
-    () => (previewSection ? getBookmarkParagraphs(previewSection) : []),
-    [previewSection],
-  )
+  }, [book, bookmark.chapter, draft, startAt])
 
   function changePlan(changes: Partial<IntegratedListeningRecord>) {
-    setDraft((current) => (current ? { ...current, ...changes } : current))
-    if (changes.from) {
-      setPreviewHref(changes.from)
-      setParagraphLimit(20)
+    if (changes.startAt) {
+      manualStartChoice.current = true
+      pendingDefault.current = false
     }
+    setDraft((current) => (current ? { ...current, ...changes } : current))
     setError('')
     setNotice('')
     setFallbackHref('')
   }
 
-  async function saveParagraph(blockId: string, text: string) {
-    if (!previewSection || !draft) return
-    setSavingMarker(true)
-    setError('')
-    try {
-      const marker: ListeningMarker = {
-        sourceHref: previewSection.sourceHref,
-        blockId,
-        text,
-        savedAt: Date.now(),
-      }
-      const saved = await saveLibraryMarker(bookId, marker, draft.fingerprint)
-      if (!alive.current) return
-      const nextMarker = saved.marker ?? marker
-      appliedPlan.current = captureListeningPlan(saved)
-      setDraft((current) =>
-        current
-          ? { ...current, marker: nextMarker, startAt: 'marker' }
-          : current,
-      )
-      setNotice('Bookmark saved. Your chapter range is unchanged.')
-      setFallbackHref('')
-      setPickerOpen(false)
-    } catch (reason) {
-      if (alive.current) {
-        setError(errorMessage(reason))
-        setBookChanged((reason as { code?: string })?.code === 'BOOK_CHANGED')
-      }
-    } finally {
-      if (alive.current) setSavingMarker(false)
-    }
-  }
-
   async function openQuietDocument() {
-    if (!draft || !book || validation || markerNeedsFrom) return
-    // Open within the click gesture, then navigate only after IndexedDB commits.
-    // Otherwise popup blocking or a load-before-save race can use the old plan.
+    if (!draft || !book || validation) return
     const companion = window.open('about:blank', '_blank')
     if (companion) companion.opener = null
     const tab = reader.focusedBookTab
@@ -266,25 +355,23 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
         {
           from: draft.from,
           through: draft.through,
-          startAt: draft.startAt,
+          startAt: startAt || 'chapter',
           returnCfi,
         },
         draft.fingerprint,
       )
       const launch = {
         ...saved,
-        marker: draft.startAt === 'marker' ? draft.marker : saved.marker,
+        marker: startAt === 'marker' ? draft.marker : saved.marker,
       }
-      buildQuietSession(book, launch)
       const sessionId = await createQuietLaunch(bookId, launch)
       const href = `/listen?book=${encodeURIComponent(
         bookId,
       )}&session=${encodeURIComponent(sessionId)}`
-      if (companion && !companion.closed) {
-        companion.location.replace(href)
-      } else if (alive.current) {
+      if (companion && !companion.closed) companion.location.replace(href)
+      else if (alive.current) {
         setFallbackHref(href)
-        setNotice('Your range is saved. Open the quiet document below.')
+        setNotice('Your range is saved. Open the listening view below.')
       }
     } catch (reason) {
       companion?.close()
@@ -349,35 +436,50 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
     )
   }
 
+  const excerpt = draft.marker?.text.replace(/\s+/g, ' ').trim() || ''
+  const shortExcerpt =
+    excerpt.length > 180 ? `${excerpt.slice(0, 177).trimEnd()}…` : excerpt
+
   return (
-    <div className="flow-listening-body" aria-busy={saving || savingMarker}>
+    <div className="flow-listening-body" aria-busy={saving}>
       <p className="flow-listening-book-title">{book.title}</p>
-      <p className="flow-listening-hint">
-        Choose a range, then open its continuous text in a quiet document.
-      </p>
       <fieldset className="flow-listening-fields" disabled={saving}>
         <legend>Chapters</legend>
         <label htmlFor="flow-listening-from">From</label>
         <select
           id="flow-listening-from"
-          value={draft.from}
+          value={chapterChoices.from}
+          aria-describedby="flow-listening-summary"
           onChange={(event) => changePlan({ from: event.target.value })}
         >
-          {sections.map((section) => (
-            <option key={section.id} value={section.sourceHref}>
-              {section.title}
+          {chapterOptions.map((chapter) => (
+            <option
+              key={chapter.id}
+              value={chapter.id}
+              disabled={chapter.disabled}
+              title={chapter.reason}
+            >
+              {'\u00a0\u00a0'.repeat(Math.min(chapter.depth, 4))}
+              {chapter.label}
             </option>
           ))}
         </select>
         <label htmlFor="flow-listening-through">Through</label>
         <select
           id="flow-listening-through"
-          value={draft.through}
+          value={chapterChoices.through}
+          aria-describedby="flow-listening-summary"
           onChange={(event) => changePlan({ through: event.target.value })}
         >
-          {sections.map((section) => (
-            <option key={section.id} value={section.sourceHref}>
-              {section.title}
+          {chapterOptions.map((chapter) => (
+            <option
+              key={chapter.id}
+              value={chapter.id}
+              disabled={chapter.disabled}
+              title={chapter.reason}
+            >
+              {'\u00a0\u00a0'.repeat(Math.min(chapter.depth, 4))}
+              {chapter.label}
             </option>
           ))}
         </select>
@@ -389,7 +491,7 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
           <input
             type="radio"
             name={`flow-listening-start-${bookId}`}
-            checked={draft.startAt === 'chapter'}
+            checked={startAt === 'chapter'}
             onChange={() => changePlan({ startAt: 'chapter' })}
           />
           Chapter beginning
@@ -398,160 +500,50 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
           <input
             type="radio"
             name={`flow-listening-start-${bookId}`}
-            checked={draft.startAt === 'marker'}
-            disabled={!draft.marker}
+            checked={startAt === 'marker'}
+            disabled={!bookmark.available}
             onChange={() => changePlan({ startAt: 'marker' })}
           />
           <span>
-            <MdBookmarkBorder aria-hidden="true" /> Bookmark
+            <MdBookmarkBorder aria-hidden="true" /> Start from Bookmark
           </span>
         </label>
-        {draft.marker ? (
+        {bookmark.available ? (
           <div className="flow-listening-marker">
+            <p className="flow-listening-hint">{bookmark.chapter?.label}</p>
+            <blockquote>{shortExcerpt}</blockquote>
             <p className="flow-listening-hint">
-              {markerSection?.title ?? 'Bookmarked chapter unavailable'}
-            </p>
-            <blockquote>{draft.marker.text}</blockquote>
-            <p className="flow-listening-hint">
-              Bookmarked on this device. This does not track Edge’s spoken
-              position.
+              Saved on this device. Used for your next listening session.
             </p>
           </div>
         ) : (
           <p className="flow-listening-hint">
-            Select text in the book and choose “Bookmark”, or bookmark a
-            paragraph below.
+            {draft.marker
+              ? 'This Bookmark is unavailable for this EPUB. Save a new Bookmark while reading.'
+              : 'No saved Bookmark yet. Save one while reading or in the listening document.'}
           </p>
         )}
       </fieldset>
 
-      {markerNeedsFrom && (
-        <div className="flow-listening-resolution" role="alert">
-          <p>
-            {markerOutside
-              ? 'Your bookmark is outside this range.'
-              : 'Your bookmark is in a different From chapter.'}
-          </p>
-          <p className="flow-listening-hint">
-            Choose which start to use before opening.
-          </p>
-          <button
-            type="button"
-            className="flow-listening-secondary"
-            disabled={saving}
-            onClick={() => changePlan({ from: markerSection!.sourceHref })}
-          >
-            Update From to bookmarked chapter
-          </button>
-          <button
-            type="button"
-            className="flow-listening-text-button"
-            disabled={saving}
-            onClick={() => changePlan({ startAt: 'chapter' })}
-          >
-            Use chapter beginning
-          </button>
-        </div>
-      )}
-
-      {validation && (!markerNeedsFrom || throughIndex < fromIndex) && (
+      {validation && (
         <p role="alert" className="flow-listening-error">
           {validation}
         </p>
       )}
-
-      <div className="flow-listening-picker">
-        <button
-          type="button"
-          className="flow-listening-secondary"
-          aria-expanded={pickerOpen}
-          aria-controls="flow-listening-paragraph-picker"
-          disabled={saving || savingMarker}
-          onClick={() => {
-            if (!pickerOpen && !previewHref) {
-              const current = sections.find(
-                (section) =>
-                  currentHref &&
-                  sameSourceHref(section.sourceHref, currentHref),
-              )
-              setPreviewHref(current?.sourceHref ?? draft.from)
-              setParagraphLimit(20)
-            }
-            setPickerOpen(!pickerOpen)
-          }}
-        >
-          {pickerOpen ? 'Close Bookmark' : 'Bookmark'}
-        </button>
-        {pickerOpen && (
-          <div id="flow-listening-paragraph-picker">
-            <label htmlFor="flow-listening-preview">Bookmark chapter</label>
-            <select
-              id="flow-listening-preview"
-              value={previewSection?.sourceHref ?? ''}
-              disabled={savingMarker}
-              onChange={(event) => {
-                setPreviewHref(event.target.value)
-                setParagraphLimit(20)
-              }}
-            >
-              {sections.map((section) => (
-                <option key={section.id} value={section.sourceHref}>
-                  {section.title}
-                </option>
-              ))}
-            </select>
-            <p className="flow-listening-hint">
-              Bookmark a paragraph to use it as your next listening start.
-            </p>
-            <ol className="flow-listening-paragraphs">
-              {paragraphs.slice(0, paragraphLimit).map((paragraph, index) => (
-                <li key={paragraph.blockId}>
-                  <button
-                    type="button"
-                    disabled={savingMarker}
-                    onClick={() =>
-                      saveParagraph(paragraph.blockId, paragraph.text)
-                    }
-                  >
-                    <span className="flow-listening-paragraph-number">
-                      Bookmark paragraph {index + 1}
-                    </span>
-                    <span>{paragraph.text}</span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-            {!paragraphs.length && (
-              <p>
-                No paragraphs available to bookmark in this section. Choose
-                another chapter.
-              </p>
-            )}
-            {paragraphs.length > paragraphLimit && (
-              <button
-                type="button"
-                className="flow-listening-text-button"
-                onClick={() => setParagraphLimit((value) => value + 20)}
-              >
-                Show more paragraphs
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="flow-listening-summary">
-        <strong>Selected range</strong>
+      <div
+        id="flow-listening-summary"
+        className="flow-listening-summary"
+        aria-live="polite"
+      >
         <p>
-          {fromSection?.title} → {throughSection?.title}
+          {fromChapter?.label} → {throughChapter?.label}
         </p>
-        <strong>Effective start</strong>
         <p>
-          {validation || markerNeedsFrom
+          {validation
             ? 'Resolve the range above.'
-            : draft.startAt === 'marker'
-            ? `Your bookmark in ${markerSection?.title}`
-            : `Beginning of ${fromSection?.title}`}
+            : startAt === 'marker'
+            ? `Starts at your Bookmark in ${bookmark.chapter?.label}. Any earlier text in this range is skipped.`
+            : `Starts at the beginning of ${fromChapter?.label}.`}
         </p>
       </div>
       {error && (
@@ -567,10 +559,10 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
       <button
         type="button"
         className="flow-listening-primary"
-        disabled={saving || savingMarker || !!validation || markerNeedsFrom}
+        disabled={saving || !!validation}
         onClick={openQuietDocument}
       >
-        {saving ? 'Preparing quiet document…' : 'Open quiet document'}
+        {saving ? 'Preparing listening view…' : 'Open listening view'}
       </button>
       {fallbackHref && (
         <a
@@ -579,17 +571,12 @@ function ListeningBookPanel({ bookId }: { bookId: string }) {
           target="_blank"
           rel="noreferrer"
         >
-          Open saved quiet document
+          Open saved listening view
         </a>
       )}
       <p className="flow-listening-hint">
-        Then use Edge’s Read aloud menu. Edge starts and controls the audio.
-      </p>
-      <p className="flow-listening-hint">
-        On Android, choose Read aloud from Edge’s menu. If an installed view
-        hides that menu, open the same quiet document URL in the Edge browser.
-        Use the same Edge profile for importing and listening so your book is
-        available.
+        Then choose Read aloud from Edge’s menu. In an installed app, open the
+        listening document in Edge using the same profile.
       </p>
     </div>
   )

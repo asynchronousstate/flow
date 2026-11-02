@@ -1,3 +1,4 @@
+import type { ListeningChapter } from './chapters'
 import type { IntegratedListeningRecord } from './integrated'
 
 export interface AppliedListeningPlan {
@@ -37,6 +38,10 @@ export function reconcileListeningPlan(
   draft: IntegratedListeningRecord,
   stored: IntegratedListeningRecord,
   applied?: AppliedListeningPlan,
+  {
+    preserveStartChoice = false,
+    bookmarkAvailable = !!stored.marker,
+  }: { preserveStartChoice?: boolean; bookmarkAvailable?: boolean } = {},
 ) {
   if (
     stored.bookId !== draft.bookId ||
@@ -53,9 +58,53 @@ export function reconcileListeningPlan(
     draft: {
       ...draft,
       marker: stored.marker ? { ...stored.marker } : undefined,
-      startAt: stored.startAt,
+      startAt: !bookmarkAvailable
+        ? 'chapter'
+        : preserveStartChoice
+        ? draft.startAt
+        : stored.startAt,
     },
     applied: next,
     changed: true,
   }
+}
+
+/** A real entry defaults to a valid saved Bookmark, without persisting a plan
+ * change. Renders and returns from the current preview keep the local choice.
+ */
+export function defaultListeningStart(
+  draft: IntegratedListeningRecord,
+  bookmarkAvailable: boolean,
+  freshOpening: boolean,
+): IntegratedListeningRecord {
+  const startAt = !bookmarkAvailable
+    ? 'chapter'
+    : freshOpening
+    ? 'marker'
+    : draft.startAt
+  return startAt === draft.startAt ? draft : { ...draft, startAt }
+}
+
+/** Show an existing TOC option for an equivalent legacy range, while retaining
+ * the original persisted reference. Partial-file chapters are never equivalent
+ * to a whole-file endpoint merely because they share a source path or label.
+ */
+export function displayListeningChapterReference(
+  reference: string,
+  resolved: Pick<ListeningChapter, 'start' | 'end'>,
+  chapters: Pick<ListeningChapter, 'id' | 'disabled' | 'start' | 'end'>[],
+) {
+  if (chapters.some((chapter) => chapter.id === reference)) return reference
+  const start = resolved.start
+  const end = resolved.end
+  if (!start || !end) return reference
+  const equivalent = chapters.find(
+    (chapter) =>
+      !chapter.disabled &&
+      chapter.start?.sectionIndex === start.sectionIndex &&
+      chapter.start?.offset === start.offset &&
+      chapter.end?.sectionIndex === end.sectionIndex &&
+      chapter.end?.offset === end.offset,
+  )
+  return equivalent?.id || reference
 }

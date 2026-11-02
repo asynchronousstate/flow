@@ -1,5 +1,16 @@
 import JSZip from 'jszip'
 
+import Navigation from '@flow/epubjs/src/navigation'
+import type { NavItem } from '@flow/epubjs/types/navigation'
+
+import {
+  createListeningChapters,
+  getListeningChapters,
+  listeningSourceId as sourceId,
+  resolveListeningReference as resolveReference,
+} from './chapters'
+import type { ListeningChapter } from './chapters'
+
 export interface ListeningSection {
   id: string
   title: string
@@ -12,6 +23,7 @@ export interface ListeningBook {
   author: string
   language: string
   sections: ListeningSection[]
+  chapters?: ListeningChapter[]
 }
 
 interface ManifestItem {
@@ -224,30 +236,10 @@ function parseXml(source: string, filename: string): Document {
   return result
 }
 
-function resolveReference(reference: string, sourcePath = '') {
-  try {
-    const base = new URL(sourcePath, 'https://epub.invalid/')
-    const resolved = new URL(reference, base)
-    if (resolved.origin !== base.origin || resolved.protocol !== 'https:') {
-      return undefined
-    }
-    return {
-      path: decodeURIComponent(resolved.pathname.slice(1)),
-      fragment: decodeURIComponent(resolved.hash.slice(1)),
-    }
-  } catch {
-    return undefined
-  }
-}
-
 async function readFile(zip: JSZip, path: string) {
   const entry = zip.file(path)
   if (!entry) throw new Error(`The EPUB is missing ${path}.`)
   return entry.async('string')
-}
-
-function sourceId(sectionId: string, id: string) {
-  return `${sectionId}-ref-${encodeURIComponent(id)}`
 }
 
 function sanitizeChapter(
@@ -391,46 +383,22 @@ function sanitizeChapter(
   return container.outerHTML
 }
 
-async function navigationTitles(zip: JSZip, manifest: ManifestItem[]) {
-  const titles = new Map<string, string>()
+async function listeningNavigation(zip: JSZip, manifest: ManifestItem[]) {
   const nav = manifest.find((item) => item.properties.includes('nav'))
   const ncx = manifest.find(
     (item) => item.mediaType === 'application/x-dtbncx+xml',
   )
   const item = nav ?? ncx
-  if (!item) return titles
+  if (!item) return undefined
 
   // A broken optional table of contents must not prevent reading valid chapters.
   try {
     const doc = parseXml(await readFile(zip, item.path), item.path)
-    if (nav) {
-      const navigation = elements(doc, 'nav')
-      const toc =
-        navigation.find((el) =>
-          (el.getAttribute('epub:type') ?? '').split(/\s+/).includes('toc'),
-        ) ?? navigation[0]
-      for (const anchor of toc ? elements(toc, 'a') : []) {
-        const href = anchor.getAttribute('href')
-        const resolved = href && resolveReference(href, item.path)
-        const title = normalizedText(anchor.textContent)
-        if (resolved && title && !titles.has(resolved.path))
-          titles.set(resolved.path, title)
-      }
-    } else {
-      for (const point of elements(doc, 'navPoint')) {
-        const src = elements(point, 'content')[0]?.getAttribute('src')
-        const resolved = src && resolveReference(src, item.path)
-        const title = normalizedText(
-          elements(point, 'navLabel')[0]?.textContent,
-        )
-        if (resolved && title && !titles.has(resolved.path))
-          titles.set(resolved.path, title)
-      }
-    }
+    return { toc: new Navigation(doc).toc, path: item.path }
   } catch {
     // The visible chapter heading remains available as a fallback.
   }
-  return titles
+  return undefined
 }
 
 /** Build a stable, script-free HTML reading document in EPUB spine order. */
@@ -490,7 +458,18 @@ export async function prepareListeningBook(
     if (!sectionIds.has(item.path))
       sectionIds.set(item.path, `flow-section-${index}`)
   })
-  const titles = await navigationTitles(zip, manifest)
+  const navigation = await listeningNavigation(zip, manifest)
+  const titles = new Map<string, string>()
+  function collectTitles(items: NavItem[]) {
+    for (const item of items) {
+      const resolved =
+        item.href && resolveReference(item.href, navigation?.path)
+      if (resolved && !titles.has(resolved.path))
+        titles.set(resolved.path, normalizedText(item.label))
+      collectTitles(item.subitems || [])
+    }
+  }
+  if (navigation) collectTitles(navigation.toc)
   const sections: ListeningSection[] = []
   for (const item of spineItems) {
     const source = await readFile(zip, item.path)
@@ -517,10 +496,14 @@ export async function prepareListeningBook(
   const metadata = elements(packageDocument, 'metadata')[0]
   const metadataText = (name: string) =>
     normalizedText(metadata && elements(metadata, name)[0]?.textContent)
-  return {
+  const book: ListeningBook = {
     title: metadataText('title') || 'Untitled book',
     author: metadataText('creator'),
     language: metadataText('language') || 'en',
     sections,
   }
+  book.chapters = navigation
+    ? createListeningChapters(book, navigation.toc, navigation.path)
+    : getListeningChapters(book)
+  return book
 }

@@ -21,7 +21,12 @@ const compiled = ts.transpileModule(source, {
 }).outputText
 const context = { exports: {} }
 vm.runInNewContext(compiled, context, { filename: 'plan.ts' })
-const { captureListeningPlan, reconcileListeningPlan } = context.exports
+const {
+  captureListeningPlan,
+  defaultListeningStart,
+  displayListeningChapterReference,
+  reconcileListeningPlan,
+} = context.exports
 
 const bookmarkA = {
   sourceHref: 'chapter-2.xhtml',
@@ -187,4 +192,180 @@ test('another book or EPUB fingerprint cannot alter this draft or advance its ap
   }
 })
 
-console.log('7/7 listening plan reconciliation groups passed.')
+test('a manual Chapter beginning choice survives a new cross-window Bookmark while its preview updates', () => {
+  const draft = {
+    ...base,
+    startAt: 'chapter',
+    from: 'local-from',
+    through: 'local-through',
+  }
+  const incoming = { ...base, marker: bookmarkA, updatedAt: 21 }
+  const result = reconcileListeningPlan(
+    draft,
+    incoming,
+    captureListeningPlan(base),
+    { preserveStartChoice: true, bookmarkAvailable: true },
+  )
+  assert.equal(result.changed, true)
+  assert.equal(result.draft.startAt, 'chapter')
+  assert.deepEqual(copy(result.draft.marker), bookmarkA)
+  assert.equal(result.draft.from, 'local-from')
+  assert.equal(result.draft.through, 'local-through')
+})
+
+test('Undo keeps a manual Bookmark choice when its restored Bookmark is still valid', () => {
+  const incoming = {
+    ...base,
+    marker: bookmarkA,
+    startAt: 'chapter',
+    updatedAt: 21,
+  }
+  const result = reconcileListeningPlan(
+    base,
+    incoming,
+    captureListeningPlan(base),
+    { preserveStartChoice: true, bookmarkAvailable: true },
+  )
+  assert.equal(result.changed, true)
+  assert.equal(result.draft.startAt, 'marker')
+  assert.deepEqual(copy(result.draft.marker), bookmarkA)
+})
+
+test('a removed or stale Bookmark falls back to Chapter beginning even after a manual Bookmark choice', () => {
+  for (const marker of [undefined, bookmarkA]) {
+    const incoming = { ...base, marker, updatedAt: 21 }
+    const result = reconcileListeningPlan(
+      base,
+      incoming,
+      captureListeningPlan(base),
+      { preserveStartChoice: true, bookmarkAvailable: false },
+    )
+    assert.equal(result.changed, true)
+    assert.equal(result.draft.startAt, 'chapter')
+    assert.equal(result.draft.from, base.from)
+    assert.equal(result.draft.through, base.through)
+  }
+})
+
+test('fresh opening defaults to a valid saved Bookmark despite the previously persisted Chapter beginning mode', () => {
+  const stored = { ...base, startAt: 'chapter' }
+  const before = copy(stored)
+  const result = defaultListeningStart(stored, true, true)
+  assert.equal(result.startAt, 'marker')
+  assert.equal(result.marker, stored.marker)
+  assert.equal(result.updatedAt, stored.updatedAt)
+  assert.equal(result.from, stored.from)
+  assert.equal(result.through, stored.through)
+  assert.deepEqual(stored, before)
+})
+
+test('rerenders and return from a current preview preserve Chapter beginning; explicit reopening defaults anew', () => {
+  const manuallyChosen = { ...base, startAt: 'chapter' }
+  const returned = defaultListeningStart(manuallyChosen, true, false)
+  assert.equal(returned, manuallyChosen)
+  assert.equal(defaultListeningStart(returned, true, false), manuallyChosen)
+  const reopened = defaultListeningStart(returned, true, true)
+  assert.equal(reopened.startAt, 'marker')
+  assert.equal(reopened.updatedAt, manuallyChosen.updatedAt)
+})
+
+test('missing or stale saved Bookmarks cannot be selected by a fresh opening or rerender', () => {
+  for (const marker of [undefined, bookmarkB]) {
+    const draft = { ...base, marker }
+    for (const fresh of [false, true]) {
+      const result = defaultListeningStart(draft, false, fresh)
+      assert.equal(result.startAt, 'chapter')
+      assert.equal(result.marker, marker)
+      assert.equal(result.updatedAt, draft.updatedAt)
+    }
+  }
+})
+
+test('a valid Bookmark outside the chosen range remains selected without silently moving either endpoint', () => {
+  const draft = {
+    ...base,
+    startAt: 'chapter',
+    from: 'chapter-4.xhtml',
+    through: 'chapter-5.xhtml',
+  }
+  const result = defaultListeningStart(draft, true, true)
+  assert.equal(result.startAt, 'marker')
+  assert.equal(result.from, 'chapter-4.xhtml')
+  assert.equal(result.through, 'chapter-5.xhtml')
+  assert.equal(result.marker, bookmarkB)
+})
+
+test('a whole-file legacy reference displays its equivalent TOC chapter without changing stored endpoints', () => {
+  const chapter = {
+    id: 'toc-pool',
+    disabled: false,
+    start: { sectionIndex: 2, offset: 0 },
+    end: { sectionIndex: 3, offset: 0 },
+  }
+  const legacy = { start: { ...chapter.start }, end: { ...chapter.end } }
+  const stored = { ...base, from: 'chapter-2.xhtml', through: 'toc-pool' }
+  const before = copy(stored)
+  assert.equal(
+    displayListeningChapterReference(stored.from, legacy, [chapter]),
+    'toc-pool',
+  )
+  assert.equal(
+    displayListeningChapterReference(stored.through, legacy, [chapter]),
+    'toc-pool',
+  )
+  assert.deepEqual(stored, before)
+})
+
+test('a legacy whole-file range stays distinct from partial fragment chapters sharing its file', () => {
+  const chapters = [
+    {
+      id: 'toc-first',
+      disabled: false,
+      start: { sectionIndex: 2, offset: 0 },
+      end: { sectionIndex: 2, offset: 50 },
+    },
+    {
+      id: 'toc-last',
+      disabled: false,
+      start: { sectionIndex: 2, offset: 50 },
+      end: { sectionIndex: 3, offset: 0 },
+    },
+  ]
+  const legacy = {
+    start: { sectionIndex: 2, offset: 0 },
+    end: { sectionIndex: 3, offset: 0 },
+  }
+  assert.equal(
+    displayListeningChapterReference('chapter-2.xhtml', legacy, chapters),
+    'chapter-2.xhtml',
+  )
+  assert.equal(
+    displayListeningChapterReference('toc-last', legacy, chapters),
+    'toc-last',
+  )
+})
+
+test('unavailable or incomplete TOC entries cannot hide a valid legacy selection', () => {
+  const legacy = {
+    start: { sectionIndex: 2, offset: 0 },
+    end: { sectionIndex: 3, offset: 0 },
+  }
+  const chapters = [
+    { id: 'disabled', disabled: true, ...legacy },
+    { id: 'incomplete', disabled: false, start: legacy.start },
+  ]
+  assert.equal(
+    displayListeningChapterReference('chapter-2.xhtml', legacy, chapters),
+    'chapter-2.xhtml',
+  )
+  assert.equal(
+    displayListeningChapterReference(
+      'chapter-2.xhtml',
+      { start: legacy.start },
+      [],
+    ),
+    'chapter-2.xhtml',
+  )
+})
+
+console.log('17/17 listening plan reconciliation groups passed.')

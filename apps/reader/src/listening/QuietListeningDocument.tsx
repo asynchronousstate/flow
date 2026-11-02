@@ -6,6 +6,7 @@ import QuietBookmarks, {
   BookmarkParagraph,
   sameBookmark,
 } from './QuietBookmarks'
+import { chapterForBookmark, resolveListeningChapter } from './chapters'
 import {
   buildQuietSession,
   getBookmarkParagraphs,
@@ -57,14 +58,18 @@ function bookmarkedParagraph(
   const paragraph = getListeningParagraphs(section).find((p) =>
     sameBookmark({ ...p, sourceHref: section.sourceHref }, marker),
   )
-  return (
-    paragraph && {
+  if (!paragraph) return
+  try {
+    return {
       ...paragraph,
       sectionId: section.id,
       sourceHref: section.sourceHref,
-      chapterTitle: section.title,
+      chapterTitle: chapterForBookmark(book, marker).title,
     }
-  )
+  } catch {
+    // Stale locators must not appear to be a valid saved listening start.
+    return undefined
+  }
 }
 
 export default function QuietListeningDocument({
@@ -88,6 +93,7 @@ export default function QuietListeningDocument({
   const saveInFlight = useRef(false)
   const fingerprint = useRef<string>()
   const loadedBook = useRef<LoadedListeningBook['book']>()
+  const launchEnd = useRef<{ reference: string; title: string }>()
   const mounted = useRef(true)
   const returnHref = `/?book=${encodeURIComponent(bookId)}&listening=1${
     sessionId ? `&session=${encodeURIComponent(sessionId)}` : ''
@@ -106,6 +112,14 @@ export default function QuietListeningDocument({
       if (!active) return
       loadedBook.current = launch.book
       fingerprint.current = launch.record.fingerprint
+      launchEnd.current = {
+        reference: launch.record.through,
+        title: resolveListeningChapter(
+          launch.book,
+          launch.record.through,
+          'through',
+        ).title,
+      }
       setSaved(
         latest.record.startAt === 'marker'
           ? bookmarkedParagraph(launch.book, latest.record.marker)
@@ -140,7 +154,6 @@ export default function QuietListeningDocument({
       ) || [],
     [session],
   )
-  const finalSection = session?.sections[session.sections.length - 1]
   const listParagraphs = useMemo(
     () =>
       session?.sections.flatMap((section) =>
@@ -155,29 +168,33 @@ export default function QuietListeningDocument({
   )
 
   async function saveParagraph(paragraph: BookmarkParagraph) {
-    if (saveInFlight.current || !finalSection || sameBookmark(saved, paragraph))
+    const book = loadedBook.current
+    const end = launchEnd.current
+    if (saveInFlight.current || !book || !end || sameBookmark(saved, paragraph))
       return
     saveInFlight.current = true
     setSaving(true)
     setSaveError('')
     setNotice('')
     try {
+      const marker: ListeningMarker = {
+        sourceHref: paragraph.sourceHref,
+        blockId: paragraph.blockId,
+        text: paragraph.text,
+        savedAt: Date.now(),
+      }
+      const chapter = chapterForBookmark(book, marker)
       const change = await saveLibraryBookmark(
         bookId,
-        {
-          sourceHref: paragraph.sourceHref,
-          blockId: paragraph.blockId,
-          text: paragraph.text,
-          savedAt: Date.now(),
-        },
+        marker,
         fingerprint.current,
-        { from: paragraph.sourceHref, through: finalSection.sourceHref },
+        { from: chapter.id, through: end.reference },
       )
       if (!mounted.current) return
-      setSaved(paragraph)
+      setSaved({ ...paragraph, chapterTitle: chapter.title })
       setUndo(change)
       setNotice(
-        `Bookmark saved. Your next session starts in ${paragraph.chapterTitle} and continues through ${finalSection.title}.`,
+        `Bookmark saved. Your next session starts in ${chapter.title} and continues through ${end.title}.`,
       )
     } catch (error) {
       if (mounted.current)

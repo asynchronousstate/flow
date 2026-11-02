@@ -1,5 +1,10 @@
 import { db } from '../db'
 
+import {
+  compareListeningPoints,
+  getListeningChapters,
+  validateListeningRange as validateChapterRange,
+} from './chapters'
 import { buildQuietSession } from './document'
 import { ListeningBook, prepareListeningBook } from './epub'
 
@@ -94,11 +99,24 @@ function defaultRecord(
   fingerprint: string,
   book: ListeningBook,
 ): IntegratedListeningRecord {
+  const chapters = getListeningChapters(book).filter(
+    (chapter) => !chapter.disabled,
+  )
+  if (!chapters.length)
+    throw new Error('This EPUB has no available chapters for listening.')
+  const first = chapters.reduce((earliest, chapter) =>
+    compareListeningPoints(chapter.start!, earliest.start!) < 0
+      ? chapter
+      : earliest,
+  )
+  const last = chapters.reduce((latest, chapter) =>
+    compareListeningPoints(chapter.end!, latest.end!) >= 0 ? chapter : latest,
+  )
   return {
     bookId,
     fingerprint,
-    from: book.sections[0]!.sourceHref,
-    through: book.sections[book.sections.length - 1]!.sourceHref,
+    from: first.id,
+    through: last.id,
     startAt: 'chapter',
     updatedAt: Date.now(),
   }
@@ -216,11 +234,8 @@ function validateListeningRange(
   book: ListeningBook,
   record: IntegratedListeningRecord,
 ) {
-  if (
-    !book.sections.some((section) => section.sourceHref === record.from) ||
-    !book.sections.some((section) => section.sourceHref === record.through)
-  )
-    throw new Error('Choose chapters that are available in this book.')
+  const problem = validateChapterRange(book, record)
+  if (problem) throw new Error(problem)
 }
 
 async function changeListeningRecord(

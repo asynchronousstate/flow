@@ -1,3 +1,9 @@
+import {
+  compareListeningPoints,
+  getBookmarkLocation,
+  getListeningRange,
+} from './chapters'
+import type { ListeningPoint } from './chapters'
 import { getSourceListeningParagraphs, listeningText } from './epub'
 import type { ListeningBook, ListeningSection } from './epub'
 import type { IntegratedListeningRecord, ListeningMarker } from './integrated'
@@ -223,7 +229,7 @@ export function markerFromRange(
   }
   if (!target) {
     throw new Error(
-      'This bookmark could not be mapped exactly to the EPUB. Reopen the chapter, or use Bookmark in listening setup; no approximate position was saved.',
+      'This bookmark could not be mapped exactly to the EPUB. Reopen the chapter, or save a bookmark in the listening document; no approximate position was saved.',
     )
   }
   return {
@@ -240,76 +246,108 @@ export function buildQuietSession(
   book: ListeningBook,
   record: IntegratedListeningRecord,
 ): QuietListeningSession {
-  const from = sectionIndex(book, record.from)
-  const through = sectionIndex(book, record.through)
-  if (through < from)
-    throw new Error(
-      'Through must be the same chapter as From or a later chapter.',
-    )
-  const sections = book.sections
-    .slice(from, through + 1)
-    .map((section) => ({ ...section }))
+  const range = getListeningRange(book, record)
+  let start = range.start
   if (record.startAt === 'marker') {
     const marker = record.marker
     if (!marker)
       throw new Error(
         'Bookmark a paragraph first, or choose Chapter beginning.',
       )
-    const markerChapter = sectionIndex(book, marker.sourceHref)
-    if (markerChapter !== from) {
-      throw new Error(
-        `Your bookmark is in “${
-          book.sections[markerChapter]!.title
-        }”. Change From to that chapter, or choose Chapter beginning.`,
-      )
-    }
-    const first = sections[0]!
-    const doc = parseSection(first)
-    const matches = paragraphElements(doc).filter(
-      (element) => element.getAttribute(paragraphAttribute) === marker.blockId,
-    )
-    const paragraph = matches[0]
+    const location = getBookmarkLocation(book, marker)
     if (
-      matches.length !== 1 ||
-      !paragraph ||
-      listeningText(paragraph) !== marker.text ||
-      !marker.text
+      compareListeningPoints(location.start, range.start) < 0 ||
+      compareListeningPoints(location.end, range.end) > 0
     ) {
       throw new Error(
-        'The bookmark no longer matches this EPUB. Bookmark it again, or choose Chapter beginning.',
+        'Your bookmark is outside this range. Change From to its chapter, extend Through, or choose Chapter beginning.',
       )
     }
-    const heading = doc.querySelector('h1, h2, h3, h4, h5, h6')
-    const contextHeading =
-      heading &&
-      !heading.contains(paragraph) &&
-      heading.compareDocumentPosition(paragraph) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-        ? (heading.cloneNode(true) as Element)
-        : undefined
-    const chapterContainer = doc.body.firstElementChild
-    const before = doc.createRange()
-    before.setStart(doc.body, 0)
-    before.setEndBefore(paragraph)
-    before.deleteContents()
-    if (contextHeading && !doc.body.contains(heading)) {
-      // Keep the original chapter context for native article extraction, but
-      // do not offer this earlier heading as a new saved paragraph choice.
-      for (const element of [
-        contextHeading,
-        ...contextHeading.querySelectorAll('*'),
-      ]) {
-        element.removeAttribute(paragraphAttribute)
-        element.removeAttribute('data-listening-source-index')
-        element.removeAttribute('data-listening-block')
+    start = location.start
+  }
+  const sections: ListeningSection[] = []
+  function nodeAtPoint(doc: Document, point: ListeningPoint) {
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ALL)
+    let node: Node | null = walker.currentNode
+    for (let i = 0; i < point.offset && node; i++) node = walker.nextNode()
+    if (!node)
+      throw new Error('This EPUB chapter boundary is no longer available.')
+    return node
+  }
+  for (let index = start.sectionIndex; index < book.sections.length; index++) {
+    if (
+      index > range.end.sectionIndex ||
+      (index === range.end.sectionIndex && range.end.offset === 0)
+    )
+      break
+    const source = book.sections[index]!
+    const section = { ...source }
+    const trimStart = index === start.sectionIndex && start.offset > 0
+    const trimEnd = index === range.end.sectionIndex
+    if (trimStart || trimEnd) {
+      const doc = parseSection(source)
+      const selected = doc.createRange()
+      selected.selectNodeContents(doc.body)
+      const firstNode = trimStart ? nodeAtPoint(doc, start) : undefined
+      if (firstNode) selected.setStartBefore(firstNode)
+      if (trimEnd) selected.setEndBefore(nodeAtPoint(doc, range.end))
+      const output = doc.implementation.createHTMLDocument('')
+      output.body.appendChild(selected.cloneContents())
+      // A fragment boundary can bisect a source paragraph. Preserve its prose,
+      // but never advertise its partial text as the original exact bookmark.
+      const sourceParagraphs = new Map(
+        paragraphElements(doc).map((paragraph) => [
+          paragraph.getAttribute(paragraphAttribute),
+          listeningText(paragraph),
+        ]),
+      )
+      for (const paragraph of paragraphElements(output)) {
+        if (
+          sourceParagraphs.get(paragraph.getAttribute(paragraphAttribute)) !==
+          listeningText(paragraph)
+        ) {
+          paragraph.removeAttribute(paragraphAttribute)
+          paragraph.removeAttribute('data-listening-source-index')
+        }
       }
-      const contextParent =
-        chapterContainer && doc.body.contains(chapterContainer)
-          ? chapterContainer
-          : doc.body
-      contextParent.prepend(contextHeading)
+      if (
+        record.startAt === 'marker' &&
+        index === start.sectionIndex &&
+        firstNode
+      ) {
+        const heading = Array.from(
+          doc.querySelectorAll('h1, h2, h3, h4, h5, h6'),
+        )
+          .filter(
+            (element) =>
+              !element.contains(firstNode) &&
+              !!(
+                element.compareDocumentPosition(firstNode) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+              ),
+          )
+          .pop()
+        if (heading) {
+          const contextHeading = heading.cloneNode(true) as Element
+          for (const element of [
+            contextHeading,
+            ...contextHeading.querySelectorAll('*'),
+          ]) {
+            element.removeAttribute(paragraphAttribute)
+            element.removeAttribute('data-listening-source-index')
+            element.removeAttribute('data-listening-block')
+          }
+          const firstElement = output.body.firstElementChild
+          const contextParent =
+            firstElement && /^(DIV|SECTION|ARTICLE)$/.test(firstElement.tagName)
+              ? firstElement
+              : output.body
+          contextParent.prepend(contextHeading)
+        }
+      }
+      section.html = output.body.innerHTML
     }
-    first.html = doc.body.innerHTML
+    sections.push(section)
   }
   // Image alt descriptions often contain production labels such as "Illo5".
   // Keep the converter's accessible source copy and printed captions intact,

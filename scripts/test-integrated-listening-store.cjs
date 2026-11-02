@@ -141,16 +141,50 @@ const fixtureBook = {
 
 function harness() {
   const db = new MemoryDatabase()
-  const dependencies = { prepareGate: undefined, prepared: 0, validated: [] }
+  const dependencies = {
+    prepareGate: undefined,
+    prepared: 0,
+    validated: [],
+    book: clone(fixtureBook),
+    rangeProblem: '',
+    rangesValidated: [],
+  }
   const controlled = {
     '../db': { db },
+    // DOM/TOC validation is exercised by test-listening-epub.cjs. These
+    // controlled boundaries verify storage forwards logical refs unchanged,
+    // respects unavailable entries and rolls back a rejected range.
+    './chapters': {
+      compareListeningPoints(left, right) {
+        return (
+          left.sectionIndex - right.sectionIndex || left.offset - right.offset
+        )
+      },
+      getListeningChapters(book) {
+        return (
+          book.chapters ||
+          book.sections.map((section) => ({
+            id: section.sourceHref,
+            disabled: false,
+          }))
+        ).map((chapter, index) => ({
+          ...chapter,
+          start: chapter.start || { sectionIndex: index, offset: 0 },
+          end: chapter.end || { sectionIndex: index + 1, offset: 0 },
+        }))
+      },
+      validateListeningRange(book, record) {
+        dependencies.rangesValidated.push(clone(record))
+        return dependencies.rangeProblem
+      },
+    },
     './epub': {
       async prepareListeningBook() {
         dependencies.prepared++
         const gate = dependencies.prepareGate
         dependencies.prepareGate = undefined
         if (gate) await gate.block()
-        return clone(fixtureBook)
+        return clone(dependencies.book)
       },
     },
     './document': {
@@ -586,6 +620,99 @@ test('bookmark save and undo reject replaced sources, wrong books, and deleted b
     /not available/,
   )
   same(await db.listening.get('book-a'), reset.record)
+})
+
+test('logical TOC range refs survive default setup, snapshots, bookmark save and Undo', async () => {
+  const { db, api, dependencies } = harness()
+  const first = 'toc:0:OPS/II.xhtml#chapter-two'
+  const last = 'toc:1:OPS/II.xhtml#chapter-three'
+  dependencies.book.chapters = [
+    { id: 'toc:bad:OPS/II.xhtml#missing', disabled: true },
+    { id: first, disabled: false },
+    { id: last, disabled: false },
+  ]
+  await seed(db)
+  const canonical = await db.books.get('book-a')
+  const initial = await api.loadLibraryListeningBook('book-a')
+  assert.equal(initial.record.from, first)
+  assert.equal(initial.record.through, last)
+  const saved = await api.saveLibraryBookmark(
+    'book-a',
+    marker('II'),
+    initial.record.fingerprint,
+    { from: first, through: last },
+  )
+  assert.equal(saved.record.marker.sourceHref, 'OPS/II.xhtml')
+  assert.equal(saved.record.through, last)
+  const launch = await api.createQuietLaunch('book-a', saved.record)
+  const restored = await api.undoLibraryBookmark(
+    'book-a',
+    saved.record,
+    saved.previous,
+  )
+  assert.equal(restored.from, first)
+  assert.equal(restored.through, last)
+  assert.equal(restored.marker, undefined)
+  const snapshot = await api.loadQuietLaunch('book-a', launch)
+  assert.equal(snapshot.record.through, last)
+  assert.equal(snapshot.record.marker.text, 'Saved paragraph')
+  assert.equal(dependencies.rangesValidated.at(-1).through, last)
+  same(await db.books.get('book-a'), canonical)
+})
+
+test('default range covers reading order when the TOC display order differs', async () => {
+  const { db, api, dependencies } = harness()
+  dependencies.book.chapters = [
+    {
+      id: 'toc:last',
+      disabled: false,
+      start: { sectionIndex: 3, offset: 0 },
+      end: { sectionIndex: 4, offset: 0 },
+    },
+    {
+      id: 'toc:first',
+      disabled: false,
+      start: { sectionIndex: 0, offset: 0 },
+      end: { sectionIndex: 1, offset: 0 },
+    },
+    {
+      id: 'toc:middle',
+      disabled: false,
+      start: { sectionIndex: 1, offset: 0 },
+      end: { sectionIndex: 3, offset: 0 },
+    },
+  ]
+  await seed(db)
+  const initial = await api.loadLibraryListeningBook('book-a')
+  assert.equal(initial.record.from, 'toc:first')
+  assert.equal(initial.record.through, 'toc:last')
+})
+
+test('an unavailable TOC range rejects a save without replacing the previous plan', async () => {
+  const { db, api, dependencies } = harness()
+  await seed(db)
+  const initial = await api.loadLibraryListeningBook('book-a')
+  dependencies.rangeProblem = 'The selected EPUB chapter anchor is unavailable.'
+  await assert.rejects(
+    api.updateListeningRecord(
+      'book-a',
+      { through: 'toc:broken:OPS/II.xhtml#missing' },
+      initial.record.fingerprint,
+    ),
+    /chapter anchor is unavailable/,
+  )
+  same(await db.listening.get('book-a'), initial.record)
+})
+
+test('setup does not create a default plan when every TOC entry is unavailable', async () => {
+  const { db, api, dependencies } = harness()
+  dependencies.book.chapters = [{ id: 'toc:missing', disabled: true }]
+  await seed(db)
+  await assert.rejects(
+    api.loadLibraryListeningBook('book-a'),
+    /no available chapters/,
+  )
+  assert.equal(await db.listening.get('book-a'), undefined)
 })
 
 async function main() {
