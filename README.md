@@ -52,10 +52,15 @@ Copy and rename all `.env.local.example`s to `.env.local` and setup the environm
 pnpm dev
 ```
 
-## Flow Listening 2.2
+## Flow Listening 2.3
 
-Latest release: [Flow Listening 2.2.0](https://github.com/asynchronousstate/flow/releases/tag/v2.2.0).
-See [what changed and the validation limits](docs/flow-listening-v2.2-release.md).
+Latest release: [Flow Listening 2.3.0](https://github.com/asynchronousstate/flow/releases/tag/v2.3.0).
+See [what changed](docs/flow-listening-v2.3-release.md) and [verification and limits](docs/flow-listening-v2.3-testing.md).
+
+Version 2.3 adds safe cache cleanup and complete library backups, Android panel
+Back / Forward, recoverable preparation, reachable listening controls, clearer
+reader tools and library resumes, and saved listening appearance presets. The
+chapter-based range and read-only saved Bookmark workflow remain intact.
 
 Flow Listening v2 keeps the original Flow library, reader, annotations, search,
 typography and reading progress, and adds listening to the ebook workflow.
@@ -86,7 +91,7 @@ The document regression fixture is generated with
 
 ### Android PWA
 
-Open [Flow Listening v2](https://flow-listening-v2.vercel.app) in Microsoft Edge on
+Open [Flow Listening 2.3](https://flow-listening-v2.vercel.app) in Microsoft Edge on
 your phone, then use Edge's **Add to Home screen** or install option. Import your EPUB
 on that phone and follow the same cover → Listen → Open listening view flow.
 If the installed view hides Read aloud, open the same quiet-document URL in

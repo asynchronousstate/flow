@@ -26,6 +26,17 @@ export interface ListeningBook {
   chapters?: ListeningChapter[]
 }
 
+export interface ListeningPreparationProgress {
+  stage: 'reading' | 'checking' | 'contents' | 'chapters' | 'ready'
+  completed?: number
+  total?: number
+}
+
+export interface ListeningPreparationOptions {
+  onProgress?: (progress: ListeningPreparationProgress) => void
+  signal?: AbortSignal
+}
+
 interface ManifestItem {
   id: string
   path: string
@@ -404,7 +415,9 @@ async function listeningNavigation(zip: JSZip, manifest: ManifestItem[]) {
 /** Build a stable, script-free HTML reading document in EPUB spine order. */
 export async function prepareListeningBook(
   data: ArrayBuffer,
+  options: ListeningPreparationOptions = {},
 ): Promise<ListeningBook> {
+  options.onProgress?.({ stage: 'contents' })
   let zip: JSZip
   try {
     zip = await JSZip.loadAsync(data)
@@ -472,6 +485,18 @@ export async function prepareListeningBook(
   if (navigation) collectTitles(navigation.toc)
   const sections: ListeningSection[] = []
   for (const item of spineItems) {
+    if (options.signal?.aborted) {
+      const error = new Error('Preparation canceled.')
+      error.name = 'AbortError'
+      throw error
+    }
+    options.onProgress?.({
+      stage: 'chapters',
+      completed: sections.length,
+      total: spineItems.length,
+    })
+    // Yield between chapters so a large book does not trap Android's UI thread.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
     const source = await readFile(zip, item.path)
     const doc =
       item.mediaType === 'text/html'
@@ -505,5 +530,10 @@ export async function prepareListeningBook(
   book.chapters = navigation
     ? createListeningChapters(book, navigation.toc, navigation.path)
     : getListeningChapters(book)
+  options.onProgress?.({
+    stage: 'chapters',
+    completed: sections.length,
+    total: spineItems.length,
+  })
   return book
 }

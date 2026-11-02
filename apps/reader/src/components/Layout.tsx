@@ -1,6 +1,6 @@
 import { Overlay } from '@literal-ui/core'
 import clsx from 'clsx'
-import { ComponentProps, useEffect, useState } from 'react'
+import { ComponentProps, useEffect, useRef, useState } from 'react'
 import { useMemo } from 'react'
 import { IconType } from 'react-icons'
 import {
@@ -11,6 +11,7 @@ import {
   MdTimeline,
   MdOutlineLightMode,
   MdHeadset,
+  MdClose,
 } from 'react-icons/md'
 import { RiFontSize, RiHome6Line, RiSettings5Line } from 'react-icons/ri'
 import { useRecoilState } from 'recoil'
@@ -22,6 +23,7 @@ import {
   useBackground,
   useColorScheme,
   useMobile,
+  useMobilePanelHistory,
   useSetAction,
   useTranslation,
 } from '../hooks'
@@ -42,6 +44,7 @@ import { TypographyView } from './viewlets/TypographyView'
 
 export const Layout: React.FC = ({ children }) => {
   useColorScheme()
+  useMobilePanelHistory()
 
   const [ready, setReady] = useState(false)
   const setAction = useSetAction()
@@ -168,6 +171,8 @@ function ViewActionBar({ className, env }: EnvActionBarProps) {
               title={name === 'listening' ? title : t(`${title}.title`)}
               Icon={Icon}
               active={active}
+              aria-pressed={active}
+              aria-controls="flow-reader-panel"
               onClick={() => setAction(active ? undefined : name)}
               key={name}
             />
@@ -289,6 +294,9 @@ const Action: React.FC<ActionProps> = ({
           />
         ))}
       <Icon size={28} />
+      {mobile && (
+        <span className="flow-mobile-action-label">{props.title}</span>
+      )}
     </button>
   )
 }
@@ -298,6 +306,21 @@ const SideBar: React.FC = () => {
   const mobile = useMobile()
   const t = useTranslation()
   const listening = action === 'listening'
+  const panelRef = useRef<HTMLDivElement>(null)
+  const returnFocus = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!mobile) return
+    if (action) {
+      if (!returnFocus.current)
+        returnFocus.current = document.activeElement as HTMLElement | null
+      panelRef.current?.focus()
+    } else {
+      const target = returnFocus.current
+      returnFocus.current = null
+      if (target?.isConnected) target.focus()
+    }
+  }, [action, mobile])
 
   const { size } = useSplitViewItem(SideBar, {
     preferredSize: 240,
@@ -309,6 +332,44 @@ const SideBar: React.FC = () => {
     <>
       {action && mobile && <Overlay onClick={() => setAction(undefined)} />}
       <div
+        id="flow-reader-panel"
+        ref={panelRef}
+        role={mobile && action ? 'dialog' : undefined}
+        aria-modal={mobile && action ? true : undefined}
+        aria-label={
+          action
+            ? listening
+              ? 'Listening range'
+              : t(`${action}.title`)
+            : undefined
+        }
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (!mobile || !action) return
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            setAction(undefined)
+          } else if (event.key === 'Tab') {
+            const controls = Array.from(
+              event.currentTarget.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex="0"]',
+              ),
+            ).filter((element) => element.getClientRects().length > 0)
+            const first = controls[0]
+            const last = controls[controls.length - 1]
+            if (
+              event.shiftKey &&
+              (document.activeElement === first ||
+                document.activeElement === event.currentTarget)
+            ) {
+              event.preventDefault()
+              last?.focus()
+            } else if (!event.shiftKey && document.activeElement === last) {
+              event.preventDefault()
+              first?.focus()
+            }
+          }
+        }}
         className={clsx(
           'SideBar bg-surface flex flex-col',
           listening && 'flow-listening-sidebar',
@@ -325,6 +386,16 @@ const SideBar: React.FC = () => {
             : size,
         }}
       >
+        {mobile && action && !listening && (
+          <button
+            type="button"
+            className="flow-pane-close"
+            aria-label={`Close ${t(`${action}.title`)}`}
+            onClick={() => setAction(undefined)}
+          >
+            <MdClose aria-hidden="true" /> Close
+          </button>
+        )}
         {viewActions.map(({ name, title, View }) => (
           <View
             key={name}
@@ -342,6 +413,7 @@ interface ReaderProps extends ComponentProps<'div'> {}
 const Reader: React.FC = ({ className, ...props }: ReaderProps) => {
   useSplitViewItem(Reader)
   const [bg] = useBackground()
+  const mobile = useMobile()
 
   const r = useReaderSnapshot()
   const readMode = r.focusedTab?.isBook
@@ -352,7 +424,13 @@ const Reader: React.FC = ({ className, ...props }: ReaderProps) => {
         'Reader flex-1 overflow-hidden',
         readMode || 'mb-12 sm:mb-0',
         bg,
+        className,
       )}
+      style={
+        mobile && !readMode
+          ? { marginBottom: 'calc(48px + env(safe-area-inset-bottom))' }
+          : undefined
+      }
       {...props}
     />
   )

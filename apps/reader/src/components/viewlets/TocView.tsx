@@ -6,6 +6,7 @@ import {
   useLibrary,
   useList,
   useMobile,
+  useSetAction,
   useTranslation,
 } from '@flow/reader/hooks'
 import {
@@ -107,6 +108,8 @@ const TocRow: React.FC<TocRowProps> = ({
   item,
   onActivate,
 }) => {
+  const mobile = useMobile()
+  const setAction = useSetAction()
   if (!item) return null
   const { label, subitems, depth, expanded, id, href } = item
   const tab = reader.focusedBookTab
@@ -129,6 +132,7 @@ const TocRow: React.FC<TocRowProps> = ({
         } else {
           tab?.display(section.href, false)
         }
+        if (mobile) setAction(undefined)
       }}
       // `tab` can not be proxy here
       toggle={() => tab?.toggle(id)}

@@ -1,12 +1,16 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useRouter } from 'next/router'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import FocusLock from 'react-focus-lock'
 import { MdBookmarkBorder, MdClose, MdHeadset } from 'react-icons/md'
 
 import { db } from '../../db'
-import { useAction, useMobile } from '../../hooks'
+import { isMobilePanelRestoration, useAction, useMobile } from '../../hooks'
+import EdgeListeningHelp from '../../listening/EdgeListeningHelp'
+import PreparationStatus from '../../listening/PreparationStatus'
+import { defaultListeningAppearance } from '../../listening/appearance'
+import type { ListeningAppearanceChoice } from '../../listening/appearance'
 import {
   chapterForBookmark,
   getListeningChapters,
@@ -17,11 +21,13 @@ import {
 } from '../../listening/chapters'
 import type { ListeningChapter } from '../../listening/chapters'
 import { ListeningBook } from '../../listening/epub'
+import type { ListeningPreparationProgress } from '../../listening/epub'
 import {
   IntegratedListeningRecord,
   createQuietLaunch,
   loadLibraryListeningBook,
   resetLibraryListeningBook,
+  retryListeningPreparation,
   updateListeningRecord,
 } from '../../listening/integrated'
 import {
@@ -116,6 +122,13 @@ function ListeningBookPanel({
   const [fallbackHref, setFallbackHref] = useState('')
   const [notice, setNotice] = useState('')
   const [opening, setOpening] = useState(0)
+  const [enabled, setEnabled] = useState(visible)
+  const [progress, setProgress] = useState<ListeningPreparationProgress>()
+  const launching = useRef(false)
+  const retryPreparation = useCallback(() => {
+    retryListeningPreparation(bookId)
+    setRetry((value) => value + 1)
+  }, [bookId])
   const appliedPlan = useRef<AppliedListeningPlan>()
   const manualStartChoice = useRef(false)
   const entry = useRef({ visible: false, first: true })
@@ -129,6 +142,10 @@ function ListeningBookPanel({
       : undefined
 
   useEffect(() => {
+    if (visible) setEnabled(true)
+  }, [visible])
+
+  useEffect(() => {
     alive.current = true
     return () => {
       alive.current = false
@@ -140,24 +157,33 @@ function ListeningBookPanel({
     if (visible && !entry.current.visible) {
       // This component remains mounted behind other reader panels. Default
       // only on an actual entry, never on a rerender or a tab's Back action.
-      const resuming = entry.current.first && !!resumeSession
+      const resuming =
+        (entry.current.first && !!resumeSession) ||
+        isMobilePanelRestoration(bookId, 'listening')
       pendingDefault.current = !resuming
       if (!resuming) manualStartChoice.current = false
       entry.current.first = false
       setOpening((value) => value + 1)
     }
     entry.current.visible = visible
-  }, [resumeSession, router.isReady, visible])
+  }, [bookId, resumeSession, router.isReady, visible])
 
   useEffect(() => {
-    if (!router.isReady) return
+    if (!router.isReady || !enabled) return
     let cancelled = false
+    const controller = new AbortController()
     setBook(undefined)
     setDraft(undefined)
     setError('')
     setBookChanged(false)
+    setProgress(undefined)
     async function load() {
-      const loaded = await loadLibraryListeningBook(bookId)
+      const loaded = await loadLibraryListeningBook(bookId, {
+        signal: controller.signal,
+        onProgress: (next) => {
+          if (!cancelled) setProgress(next)
+        },
+      })
       // The EPUB fingerprint was just verified above. Read only launch
       // metadata to preserve the preview's explicit mode when returning.
       const launch = resumeSession
@@ -184,8 +210,9 @@ function ListeningBookPanel({
     })
     return () => {
       cancelled = true
+      controller.abort()
     }
-  }, [bookId, resumeSession, retry, router.isReady])
+  }, [bookId, enabled, resumeSession, retry, router.isReady])
 
   // Keep a manually chosen start mode and range while the saved preview follows
   // newer bookmarks/Undo. A removed or stale Bookmark cannot remain active.
@@ -338,7 +365,8 @@ function ListeningBookPanel({
   }
 
   async function openQuietDocument() {
-    if (!draft || !book || validation) return
+    if (!draft || !book || validation || launching.current) return
+    launching.current = true
     const companion = window.open('about:blank', '_blank')
     if (companion) companion.opener = null
     const tab = reader.focusedBookTab
@@ -357,6 +385,7 @@ function ListeningBookPanel({
           through: draft.through,
           startAt: startAt || 'chapter',
           returnCfi,
+          appearance: draft.appearance ?? defaultListeningAppearance,
         },
         draft.fingerprint,
       )
@@ -380,6 +409,7 @@ function ListeningBookPanel({
         setBookChanged((reason as { code?: string })?.code === 'BOOK_CHANGED')
       }
     } finally {
+      launching.current = false
       if (alive.current) setSaving(false)
     }
   }
@@ -423,14 +453,18 @@ function ListeningBookPanel({
               <button
                 type="button"
                 className="flow-listening-secondary"
-                onClick={() => setRetry((value) => value + 1)}
+                onClick={retryPreparation}
               >
                 Try again
               </button>
             )}
           </>
         ) : (
-          <p role="status">Preparing this book…</p>
+          <PreparationStatus
+            key={retry}
+            progress={progress}
+            onRetry={retryPreparation}
+          />
         )}
       </div>
     )
@@ -441,143 +475,198 @@ function ListeningBookPanel({
     excerpt.length > 180 ? `${excerpt.slice(0, 177).trimEnd()}…` : excerpt
 
   return (
-    <div className="flow-listening-body" aria-busy={saving}>
-      <p className="flow-listening-book-title">{book.title}</p>
-      <fieldset className="flow-listening-fields" disabled={saving}>
-        <legend>Chapters</legend>
-        <label htmlFor="flow-listening-from">From</label>
-        <select
-          id="flow-listening-from"
-          value={chapterChoices.from}
-          aria-describedby="flow-listening-summary"
-          onChange={(event) => changePlan({ from: event.target.value })}
-        >
-          {chapterOptions.map((chapter) => (
-            <option
-              key={chapter.id}
-              value={chapter.id}
-              disabled={chapter.disabled}
-              title={chapter.reason}
-            >
-              {'\u00a0\u00a0'.repeat(Math.min(chapter.depth, 4))}
-              {chapter.label}
-            </option>
-          ))}
-        </select>
-        <label htmlFor="flow-listening-through">Through</label>
-        <select
-          id="flow-listening-through"
-          value={chapterChoices.through}
-          aria-describedby="flow-listening-summary"
-          onChange={(event) => changePlan({ through: event.target.value })}
-        >
-          {chapterOptions.map((chapter) => (
-            <option
-              key={chapter.id}
-              value={chapter.id}
-              disabled={chapter.disabled}
-              title={chapter.reason}
-            >
-              {'\u00a0\u00a0'.repeat(Math.min(chapter.depth, 4))}
-              {chapter.label}
-            </option>
-          ))}
-        </select>
-      </fieldset>
+    <div className="flow-listening-session" aria-busy={saving}>
+      <div className="flow-listening-body">
+        <p className="flow-listening-book-title">{book.title}</p>
+        <fieldset className="flow-listening-fields" disabled={saving}>
+          <legend>Chapters</legend>
+          <label htmlFor="flow-listening-from">From</label>
+          <select
+            id="flow-listening-from"
+            value={chapterChoices.from}
+            aria-describedby="flow-listening-summary"
+            onChange={(event) => changePlan({ from: event.target.value })}
+          >
+            {chapterOptions.map((chapter) => (
+              <option
+                key={chapter.id}
+                value={chapter.id}
+                disabled={chapter.disabled}
+                title={chapter.reason}
+              >
+                {'\u00a0\u00a0'.repeat(Math.min(chapter.depth, 4))}
+                {chapter.label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="flow-listening-through">Through</label>
+          <select
+            id="flow-listening-through"
+            value={chapterChoices.through}
+            aria-describedby="flow-listening-summary"
+            onChange={(event) => changePlan({ through: event.target.value })}
+          >
+            {chapterOptions.map((chapter) => (
+              <option
+                key={chapter.id}
+                value={chapter.id}
+                disabled={chapter.disabled}
+                title={chapter.reason}
+              >
+                {'\u00a0\u00a0'.repeat(Math.min(chapter.depth, 4))}
+                {chapter.label}
+              </option>
+            ))}
+          </select>
+        </fieldset>
 
-      <fieldset className="flow-listening-start" disabled={saving}>
-        <legend>Start at</legend>
-        <label>
-          <input
-            type="radio"
-            name={`flow-listening-start-${bookId}`}
-            checked={startAt === 'chapter'}
-            onChange={() => changePlan({ startAt: 'chapter' })}
-          />
-          Chapter beginning
-        </label>
-        <label>
-          <input
-            type="radio"
-            name={`flow-listening-start-${bookId}`}
-            checked={startAt === 'marker'}
-            disabled={!bookmark.available}
-            onChange={() => changePlan({ startAt: 'marker' })}
-          />
-          <span>
-            <MdBookmarkBorder aria-hidden="true" /> Start from Bookmark
-          </span>
-        </label>
-        {bookmark.available ? (
-          <div className="flow-listening-marker">
-            <p className="flow-listening-hint">{bookmark.chapter?.label}</p>
-            <blockquote>{shortExcerpt}</blockquote>
+        <fieldset className="flow-listening-start" disabled={saving}>
+          <legend>Start at</legend>
+          <label>
+            <input
+              type="radio"
+              name={`flow-listening-start-${bookId}`}
+              checked={startAt === 'chapter'}
+              onChange={() => changePlan({ startAt: 'chapter' })}
+            />
+            Chapter beginning
+          </label>
+          <label>
+            <input
+              type="radio"
+              name={`flow-listening-start-${bookId}`}
+              checked={startAt === 'marker'}
+              disabled={!bookmark.available}
+              onChange={() => changePlan({ startAt: 'marker' })}
+            />
+            <span>
+              <MdBookmarkBorder aria-hidden="true" /> Start from Bookmark
+            </span>
+          </label>
+          {bookmark.available ? (
+            <div className="flow-listening-marker">
+              <p className="flow-listening-hint">{bookmark.chapter?.label}</p>
+              <blockquote>{shortExcerpt}</blockquote>
+              <p className="flow-listening-hint">
+                Saved on this device. Used for your next listening session.
+              </p>
+            </div>
+          ) : (
             <p className="flow-listening-hint">
-              Saved on this device. Used for your next listening session.
+              {draft.marker
+                ? 'This Bookmark is unavailable for this EPUB. Save a new Bookmark while reading.'
+                : 'No saved Bookmark yet. Save one while reading or in the listening document.'}
             </p>
-          </div>
-        ) : (
-          <p className="flow-listening-hint">
-            {draft.marker
-              ? 'This Bookmark is unavailable for this EPUB. Save a new Bookmark while reading.'
-              : 'No saved Bookmark yet. Save one while reading or in the listening document.'}
+          )}
+        </fieldset>
+
+        {validation && (
+          <p role="alert" className="flow-listening-error">
+            {validation}
           </p>
         )}
-      </fieldset>
-
-      {validation && (
-        <p role="alert" className="flow-listening-error">
-          {validation}
-        </p>
-      )}
-      <div
-        id="flow-listening-summary"
-        className="flow-listening-summary"
-        aria-live="polite"
-      >
-        <p>
-          {fromChapter?.label} → {throughChapter?.label}
-        </p>
-        <p>
-          {validation
-            ? 'Resolve the range above.'
-            : startAt === 'marker'
-            ? `Starts at your Bookmark in ${bookmark.chapter?.label}. Any earlier text in this range is skipped.`
-            : `Starts at the beginning of ${fromChapter?.label}.`}
+        <div
+          id="flow-listening-summary"
+          className="flow-listening-summary"
+          aria-live="polite"
+        >
+          <p>
+            {fromChapter?.label} → {throughChapter?.label}
+          </p>
+          <p>
+            {validation
+              ? 'Resolve the range above.'
+              : startAt === 'marker'
+              ? `Starts at your Bookmark in ${bookmark.chapter?.label}. Any earlier text in this range is skipped.`
+              : `Starts at the beginning of ${fromChapter?.label}.`}
+          </p>
+        </div>
+        {error && (
+          <p role="alert" className="flow-listening-error">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p role="status" className="flow-listening-hint">
+            {notice}
+          </p>
+        )}
+        <details className="flow-listening-appearance">
+          <summary>Listening appearance</summary>
+          <p className="flow-listening-hint">
+            Applies when you open the next listening view. Your active document
+            stays unchanged.
+          </p>
+          <label htmlFor="flow-listening-preset">Text</label>
+          <select
+            id="flow-listening-preset"
+            value={draft.appearance?.preset ?? 'comfortable'}
+            onChange={(event) =>
+              changePlan({
+                appearance: {
+                  ...(draft.appearance ?? defaultListeningAppearance),
+                  preset: event.target
+                    .value as ListeningAppearanceChoice['preset'],
+                  ...(event.target.value === 'reading'
+                    ? { theme: 'reading' as const }
+                    : {}),
+                },
+              })
+            }
+          >
+            <option value="comfortable">Comfortable</option>
+            <option value="large">Large text</option>
+            <option value="compact">Compact</option>
+            <option value="reading">Use reading appearance</option>
+          </select>
+          <label htmlFor="flow-listening-theme">Theme</label>
+          <select
+            id="flow-listening-theme"
+            value={draft.appearance?.theme ?? 'light'}
+            onChange={(event) =>
+              changePlan({
+                appearance: {
+                  ...(draft.appearance ?? defaultListeningAppearance),
+                  theme: event.target
+                    .value as ListeningAppearanceChoice['theme'],
+                },
+              })
+            }
+          >
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="sepia">Sepia</option>
+            <option value="reading">Use reading theme</option>
+          </select>
+        </details>
+        <details className="flow-listening-help">
+          <summary>How to listen in Edge</summary>
+          <EdgeListeningHelp />
+        </details>
+      </div>
+      <div className="flow-listening-launch">
+        <button
+          type="button"
+          className="flow-listening-primary"
+          disabled={saving || !!validation}
+          onClick={openQuietDocument}
+        >
+          {saving ? 'Preparing listening view…' : 'Open listening view'}
+        </button>
+        {fallbackHref && (
+          <a
+            className="flow-listening-secondary"
+            href={fallbackHref}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open saved listening view
+          </a>
+        )}
+        <p className="flow-listening-hint">
+          Then open Edge’s menu → Read aloud.
         </p>
       </div>
-      {error && (
-        <p role="alert" className="flow-listening-error">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p role="status" className="flow-listening-hint">
-          {notice}
-        </p>
-      )}
-      <button
-        type="button"
-        className="flow-listening-primary"
-        disabled={saving || !!validation}
-        onClick={openQuietDocument}
-      >
-        {saving ? 'Preparing listening view…' : 'Open listening view'}
-      </button>
-      {fallbackHref && (
-        <a
-          className="flow-listening-secondary"
-          href={fallbackHref}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open saved listening view
-        </a>
-      )}
-      <p className="flow-listening-hint">
-        Then choose Read aloud from Edge’s menu. In an installed app, open the
-        listening document in Edge using the same profile.
-      </p>
     </div>
   )
 }

@@ -10,7 +10,7 @@ import React, {
 import { MdChevronRight, MdHeadset, MdWebAsset } from 'react-icons/md'
 import { RiBookLine } from 'react-icons/ri'
 import { PhotoSlider } from 'react-photo-view'
-import { useSetRecoilState } from 'recoil'
+import { useRecoilState, useSetRecoilState } from 'recoil'
 import useTilg from 'tilg'
 import { useSnapshot } from 'valtio'
 
@@ -21,6 +21,8 @@ import { db } from '../db'
 import { handleFiles } from '../file'
 import {
   hasSelection,
+  canTurnReaderPage,
+  isReaderViewportZoomed,
   useBackground,
   useColorScheme,
   useDisablePinchZooming,
@@ -96,6 +98,7 @@ function ReaderGroup({ index }: ReaderGroupProps) {
   const { focusedIndex } = useReaderSnapshot()
   const { tabs, selectedIndex } = useSnapshot(group)
   const t = useTranslation()
+  const [dropError, setDropError] = useState('')
 
   const { size } = useSplitViewItem(`${ReaderGroup.name}.${index}`, {
     // to disable sash resize
@@ -108,7 +111,7 @@ function ReaderGroup({ index }: ReaderGroupProps) {
 
   return (
     <div
-      className="ReaderGroup flex flex-1 flex-col overflow-hidden focus:outline-none"
+      className="ReaderGroup flex min-h-0 flex-1 flex-col overflow-hidden focus:outline-none"
       onMouseDown={handleMouseDown}
       style={{ width: size }}
     >
@@ -138,52 +141,70 @@ function ReaderGroup({ index }: ReaderGroupProps) {
         })}
       </Tab.List>
 
+      {dropError && (
+        <div className="flow-reader-drop-error shrink-0" role="alert">
+          <p>{dropError}</p>
+          <button type="button" onClick={() => setDropError('')}>
+            Dismiss import error
+          </button>
+        </div>
+      )}
+
       <DropZone
-        className={clsx('flex-1', isTouchScreen || 'h-0')}
+        className="h-0 min-h-0 flex-1 overflow-hidden"
         split
         onDrop={async (e, position) => {
-          // read `e.dataTransfer` first to avoid get empty value after `await`
-          const files = e.dataTransfer.files
-          let tabs = []
+          setDropError('')
+          try {
+            // read `e.dataTransfer` first to avoid get empty value after `await`
+            const files = e.dataTransfer.files
+            let tabs = []
 
-          if (files.length) {
-            tabs = await handleFiles(files)
-          } else {
-            const text = e.dataTransfer.getData('text/plain')
-            const fromTab = text.includes(',')
-
-            if (fromTab) {
-              const indexes = text.split(',')
-              const groupIdx = Number(indexes[0])
-
-              if (index === groupIdx) {
-                if (group.tabs.length === 1) return
-                if (position === 'universe') return
-              }
-
-              const tabIdx = Number(indexes[1])
-              const tab = reader.removeTab(tabIdx, groupIdx)
-              if (tab) tabs.push(tab)
+            if (files.length) {
+              tabs = await handleFiles(files)
             } else {
-              const id = text
-              const tabParam =
-                Object.values(pages).find((p) => p.displayName === id) ??
-                (await db?.books.get(id))
-              if (tabParam) tabs.push(tabParam)
-            }
-          }
+              const text = e.dataTransfer.getData('text/plain')
+              const fromTab = text.includes(',')
 
-          if (tabs.length) {
-            switch (position) {
-              case 'left':
-                reader.addGroup(tabs, index)
-                break
-              case 'right':
-                reader.addGroup(tabs, index + 1)
-                break
-              default:
-                tabs.forEach((t) => reader.addTab(t, index))
+              if (fromTab) {
+                const indexes = text.split(',')
+                const groupIdx = Number(indexes[0])
+
+                if (index === groupIdx) {
+                  if (group.tabs.length === 1) return
+                  if (position === 'universe') return
+                }
+
+                const tabIdx = Number(indexes[1])
+                const tab = reader.removeTab(tabIdx, groupIdx)
+                if (tab) tabs.push(tab)
+              } else {
+                const id = text
+                const tabParam =
+                  Object.values(pages).find((p) => p.displayName === id) ??
+                  (await db?.books.get(id))
+                if (tabParam) tabs.push(tabParam)
+              }
             }
+
+            if (tabs.length) {
+              switch (position) {
+                case 'left':
+                  reader.addGroup(tabs, index)
+                  break
+                case 'right':
+                  reader.addGroup(tabs, index + 1)
+                  break
+                default:
+                  tabs.forEach((t) => reader.addTab(t, index))
+              }
+            }
+          } catch (error) {
+            setDropError(
+              error instanceof Error
+                ? error.message
+                : 'This file could not be imported. Choose an EPUB or a supported Flow backup.',
+            )
           }
         }}
       >
@@ -205,7 +226,11 @@ interface PaneContainerProps {
   active: boolean
 }
 const PaneContainer: React.FC<PaneContainerProps> = ({ active, children }) => {
-  return <div className={clsx('h-full', active || 'hidden')}>{children}</div>
+  return (
+    <div className={clsx('h-full min-h-0 overflow-hidden', active || 'hidden')}>
+      {children}
+    </div>
+  )
 }
 
 interface BookPaneProps {
@@ -299,6 +324,7 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
   useEventListener(iframe, 'mousedown', onMouseDown)
 
   useEventListener(iframe, 'click', (e) => {
+    if (isReaderViewportZoomed(iframe)) return
     // https://developer.chrome.com/blog/tap-to-search
     e.preventDefault()
 
@@ -340,6 +366,7 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
   })
 
   useEventListener(iframe, 'wheel', (e) => {
+    if (e.ctrlKey || e.metaKey || isReaderViewportZoomed(iframe)) return
     if (e.deltaY < 0) {
       tab.prev()
     } else {
@@ -350,17 +377,25 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
   useEventListener(iframe, 'keydown', handleKeyDown(tab))
 
   useEventListener(iframe, 'touchstart', (e) => {
+    if (!iframe) return
+    // A second finger invalidates any pending one-finger page turn.
+    iframe.ontouchend = undefined
+    if (!canTurnReaderPage(iframe, e.touches.length)) return
     const x0 = e.targetTouches[0]?.clientX ?? 0
     const y0 = e.targetTouches[0]?.clientY ?? 0
     const t0 = Date.now()
-
-    if (!iframe) return
 
     // When selecting text with long tap, `touchend` is not fired,
     // so instead of use `addEventlistener`, we should use `on*`
     // to remove the previous listener.
     iframe.ontouchend = function handleTouchEnd(e: TouchEvent) {
       iframe.ontouchend = undefined
+      if (
+        e.touches.length ||
+        e.changedTouches.length !== 1 ||
+        !canTurnReaderPage(iframe)
+      )
+        return
       const selection = iframe.getSelection()
       if (hasSelection(selection)) return
 
@@ -393,11 +428,20 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
     }
   })
 
+  useEventListener(iframe, 'touchcancel', () => {
+    if (iframe) iframe.ontouchend = undefined
+  })
+
   // The paginated reader owns swipe gestures for page turns.
-  useDisablePinchZooming(iframe, { preventPan: !!iframe })
+  useDisablePinchZooming(iframe, { preventPan: !!iframe, preventPinch: false })
 
   return (
-    <div className={clsx('flex h-full flex-col', mobile && 'py-[3vw]')}>
+    <div
+      className={clsx(
+        'flex h-full min-h-0 flex-col overflow-hidden',
+        mobile && 'py-[3vw]',
+      )}
+    >
       <PhotoSlider
         images={[{ src, key: 0 }]}
         visible={!!src}
@@ -408,7 +452,7 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
       <ReaderPaneHeader tab={tab} />
       <div
         ref={ref}
-        className={clsx('relative flex-1', isTouchScreen || 'h-0')}
+        className="relative h-0 min-h-0 flex-1 overflow-hidden"
         // `color-scheme: dark` will make iframe background white
         style={{ colorScheme: 'auto' }}
       >
@@ -434,42 +478,89 @@ interface ReaderPaneHeaderProps {
 }
 const ReaderPaneHeader: React.FC<ReaderPaneHeaderProps> = ({ tab }) => {
   const setAction = useSetAction()
+  const mobile = useMobile()
+  const [navbar, setNavbar] = useRecoilState(navbarState)
+  const [showGuidance, setShowGuidance] = useState(false)
   const { location } = useSnapshot(tab)
   const navPath = tab.getNavPath()
+
+  useEffect(() => {
+    if (!mobile) return
+    try {
+      setShowGuidance(!localStorage.getItem('flow.readerToolsTipDismissed'))
+    } catch {
+      setShowGuidance(true)
+    }
+  }, [mobile])
 
   useEffect(() => {
     navPath.forEach((i) => (i.expanded = true))
   }, [navPath])
 
   return (
-    <Bar className="flow-listening-reader-header">
-      <button
-        type="button"
-        className="flow-listening-entry shrink-0"
-        onClick={() => {
-          reader.addTab(tab)
-          setAction('listening')
-        }}
-      >
-        <MdHeadset aria-hidden="true" /> Listen
-      </button>
-      <div className="scroll-h flex">
-        {navPath.map((item, i) => (
+    <>
+      <Bar className="flow-listening-reader-header">
+        <button
+          type="button"
+          className="flow-listening-entry shrink-0"
+          onClick={() => {
+            reader.addTab(tab)
+            setAction('listening')
+          }}
+        >
+          <MdHeadset aria-hidden="true" /> Listen
+        </button>
+        <div className="scroll-h flex min-w-0 flex-1">
+          {navPath.map((item, i) => (
+            <button
+              key={i}
+              className="hover:text-on-surface flex shrink-0 items-center"
+              title={`Open contents: ${item.label}`}
+              onClick={() => setAction('toc')}
+            >
+              {item.label}
+              {i !== navPath.length - 1 && <MdChevronRight size={20} />}
+            </button>
+          ))}
+        </div>
+        {mobile && (
           <button
-            key={i}
-            className="hover:text-on-surface flex shrink-0 items-center"
+            type="button"
+            className="flow-listening-entry shrink-0"
+            aria-expanded={navbar}
+            onClick={() => setNavbar((visible) => !visible)}
           >
-            {item.label}
-            {i !== navPath.length - 1 && <MdChevronRight size={20} />}
+            Tools
           </button>
-        ))}
-      </div>
-      {location && (
-        <div className="shrink-0">
-          {location.start.displayed.page} / {location.start.displayed.total}
+        )}
+        {location && (
+          <div className="shrink-0">
+            {location.start.displayed.page} / {location.start.displayed.total}
+          </div>
+        )}
+      </Bar>
+      {showGuidance && (
+        <div className="flow-reader-guidance">
+          <p>
+            Use Tools for contents, search, notes and reading appearance. You
+            can also tap the center of a page.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setShowGuidance(false)
+              try {
+                localStorage.setItem('flow.readerToolsTipDismissed', '1')
+              } catch {
+                /* Guidance can still be dismissed for this view. */
+              }
+            }}
+          >
+            Got it
+          </button>
         </div>
       )}
-    </Bar>
+    </>
   )
 }
 
@@ -477,10 +568,11 @@ interface FooterProps {
   tab: BookTab
 }
 const ReaderPaneFooter: React.FC<FooterProps> = ({ tab }) => {
-  const { locationToReturn, location, book } = useSnapshot(tab)
+  const { locationToReturn, book } = useSnapshot(tab)
+  const chapterLabel = tab.currentNavItem?.label.trim() || 'Current chapter'
 
   return (
-    <Bar>
+    <Bar className="flow-reader-footer">
       {locationToReturn ? (
         <>
           <button
@@ -490,7 +582,7 @@ const ReaderPaneFooter: React.FC<FooterProps> = ({ tab }) => {
               tab.display(locationToReturn.end.cfi, false)
             }}
           >
-            Return to {locationToReturn.end.cfi}
+            Return to previous passage
           </button>
           <button
             onClick={() => {
@@ -502,8 +594,12 @@ const ReaderPaneFooter: React.FC<FooterProps> = ({ tab }) => {
         </>
       ) : (
         <>
-          <div>{location?.start.href}</div>
-          <div>{((book.percentage ?? 0) * 100).toFixed()}%</div>
+          <div className="flow-reader-chapter-label" title={chapterLabel}>
+            {chapterLabel}
+          </div>
+          <div className="shrink-0" aria-label="Reading progress">
+            {((book.percentage ?? 0) * 100).toFixed()}%
+          </div>
         </>
       )}
     </Bar>

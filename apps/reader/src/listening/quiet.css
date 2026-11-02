@@ -5,8 +5,8 @@
 
 .flow-quiet {
   min-height: 100%;
-  background: #fff;
-  color: #29323c;
+  background: var(--quiet-background, #fff);
+  color: var(--quiet-foreground, #29323c);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 14px;
   line-height: 1.5;
@@ -208,9 +208,10 @@
   width: min(100%, 780px);
   margin: 0 auto;
   padding: 40px 28px 120px;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 22px;
-  line-height: 1.75;
+  font-family: var(--quiet-font-family, Georgia, 'Times New Roman', serif);
+  font-size: var(--quiet-font-size, 22px);
+  font-weight: var(--quiet-font-weight, 400);
+  line-height: var(--quiet-line-height, 1.75);
 }
 
 .flow-quiet-article > section + section {
@@ -366,8 +367,8 @@
 
   .flow-quiet-article {
     padding: 28px 22px 80px;
-    font-size: 21px;
-    line-height: 1.7;
+    font-size: var(--quiet-font-size, 21px);
+    line-height: var(--quiet-line-height, 1.7);
   }
 
   .flow-quiet-article :is(h1, h2) {
@@ -377,4 +378,75 @@
   .flow-quiet-choice {
     padding: 12px;
   }
+}
+
+.flow-quiet[data-quiet-theme='dark'] {
+  --quiet-background: #20262c;
+  --quiet-foreground: #e4e8ec;
+  --quiet-panel: #29343d;
+  --quiet-outline: #586772;
+  color-scheme: dark;
+}
+.flow-quiet[data-quiet-theme='sepia'] {
+  --quiet-background: #f5eddd;
+  --quiet-foreground: #493c2f;
+  --quiet-panel: #eee1cb;
+  --quiet-outline: #cdbda4;
+}
+.flow-quiet[data-quiet-theme='dark'] a {
+  color: #8ccde7;
+}
+.flow-quiet[data-quiet-theme='dark'] .flow-quiet-muted,
+.flow-quiet[data-quiet-theme='dark'] .flow-quiet-return,
+.flow-quiet[data-quiet-theme='dark'] .flow-quiet-bookmark-status {
+  color: #c1ccd5;
+}
+.flow-quiet[data-quiet-theme='dark'] .flow-quiet-error {
+  color: #ffb4ab;
+}
+.flow-quiet[data-quiet-theme='dark'] .flow-quiet-label {
+  color: #8ccde7;
+}
+.flow-quiet[data-quiet-theme] .flow-quiet-choice,
+.flow-quiet[data-quiet-theme] .flow-quiet-paragraph-list select,
+.flow-quiet[data-quiet-theme] button:not(.flow-quiet-bookmark) {
+  background: var(--quiet-panel, #f8fafb);
+  border-color: var(--quiet-outline, #d3dce3);
+  color: inherit;
+}
+.flow-quiet button:not(.flow-quiet-bookmark),
+.flow-quiet summary,
+.flow-quiet select {
+  min-height: 44px;
+}
+.flow-quiet .flow-quiet-marker-tools {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+}
+.flow-quiet-help {
+  margin-top: 20px;
+  border-top: 1px solid var(--quiet-outline, #e2e7ec);
+}
+.flow-quiet-save-toast {
+  position: fixed;
+  z-index: 30;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  width: min(640px, calc(100% - 24px));
+  border: 1px solid var(--quiet-outline, #b6cad3);
+  border-radius: 6px;
+  background: var(--quiet-background, #fff);
+  color: var(--quiet-foreground, #29323c);
+  padding: 10px 14px;
+  box-shadow: 0 4px 22px #0003;
+}
+.flow-quiet-save-toast p {
+  flex: 1 1 220px;
+  margin: 0;
 }

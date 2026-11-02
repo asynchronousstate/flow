@@ -6,6 +6,7 @@ import { VscCopy } from 'react-icons/vsc'
 import { Annotation } from '@flow/reader/annotation'
 import { useTranslation } from '@flow/reader/hooks'
 import { reader, useReaderSnapshot } from '@flow/reader/models'
+import { useSettings } from '@flow/reader/state'
 import { copy, group, keys } from '@flow/reader/utils'
 
 import { Row } from '../Row'
@@ -26,6 +27,12 @@ const DefinitionPane: React.FC = () => {
 
   return (
     <Pane headline={t('definitions')} preferredSize={120}>
+      {!focusedBookTab?.book.definitions.length && (
+        <p className="flow-reader-empty">
+          Saved words appear here. Select a word in the book and choose Define
+          from the text selection menu.
+        </p>
+      )}
       {focusedBookTab?.book.definitions.map((d) => {
         return (
           <Row
@@ -45,6 +52,7 @@ const DefinitionPane: React.FC = () => {
 const AnnotationPane: React.FC = () => {
   const { focusedBookTab } = useReaderSnapshot()
   const t = useTranslation('annotation')
+  const [settings, setSettings] = useSettings()
 
   const annotations = useMemo(
     () => (focusedBookTab?.book.annotations as Annotation[]) ?? [],
@@ -100,6 +108,34 @@ const AnnotationPane: React.FC = () => {
           : undefined
       }
     >
+      {!annotations.length && (
+        <div className="flow-reader-empty">
+          <p>
+            No annotations yet. Select text in the book to highlight it or add a
+            note.
+          </p>
+          <p>
+            Your highlights and notes appear here; choose one to return to its
+            passage.
+          </p>
+          {settings.enableTextSelectionMenu === false && (
+            <>
+              <p>The text selection menu is turned off.</p>
+              <button
+                type="button"
+                onClick={() =>
+                  setSettings((current) => ({
+                    ...current,
+                    enableTextSelectionMenu: true,
+                  }))
+                }
+              >
+                Enable text selection menu
+              </button>
+            </>
+          )}
+        </div>
+      )}
       {keys(groupedAnnotation).map((k) => (
         <AnnotationBlock key={k} annotations={groupedAnnotation[k]!} />
       ))}

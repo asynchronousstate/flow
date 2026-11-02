@@ -66,6 +66,60 @@
   scrollbar-gutter: stable;
 }
 
+.flow-listening-session {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.flow-listening-launch {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid rgb(var(--md-sys-color-outline, 110 122 128) / 25%);
+  background: rgb(var(--md-sys-color-surface, 255 255 255));
+  padding: 12px 18px max(12px, env(safe-area-inset-bottom));
+}
+
+.flow-listening-launch p {
+  margin: 0;
+}
+.flow-listening-appearance summary,
+.flow-listening-help summary {
+  min-height: 44px;
+  padding: 10px 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+.flow-listening-appearance label {
+  display: block;
+  margin: 10px 0 6px;
+}
+.flow-listening-appearance select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid rgb(var(--md-sys-color-outline, 110 122 128) / 35%);
+  border-radius: 3px;
+  background: rgb(var(--md-sys-color-surface, 255 255 255));
+  color: inherit;
+}
+.flow-listening-help p + p {
+  margin-top: 10px;
+}
+.flow-preparation {
+  display: grid;
+  gap: 12px;
+}
+.flow-preparation button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+}
+
 .flow-listening-body p,
 .flow-listening-selection p {
   margin: 0;

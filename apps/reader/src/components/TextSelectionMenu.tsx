@@ -20,6 +20,7 @@ import {
   useTranslation,
   useTypography,
 } from '../hooks'
+import { chapterForBookmark } from '../listening/chapters'
 import { markerFromRange } from '../listening/document'
 import {
   loadLibraryListeningBook,
@@ -45,7 +46,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({
 
   // `manager` is not reactive, so we need to use getter
   const view = useCallback(() => {
-    return rendition?.manager?.views._views[0]
+    return rendition?.manager?.views?._views?.[0]
   }, [rendition])
 
   const win = view()?.window
@@ -152,6 +153,7 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
         throw new Error('Wait for this chapter to finish loading.')
       const { book, record } = await loadLibraryListeningBook(tab.book.id)
       const marker = markerFromRange(book, sourceHref, selectedRange, cfi)
+      marker.chapterTitle = chapterForBookmark(book, marker).title
       await saveLibraryMarker(tab.book.id, marker, record.fingerprint)
       reader.addTab(tab)
       setAction('listening')

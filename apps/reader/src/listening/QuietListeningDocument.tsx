@@ -1,22 +1,44 @@
+import { useMediaQuery } from '@literal-ui/hooks'
 import Head from 'next/head'
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/router'
+import {
+  CSSProperties,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { FiArrowLeft } from 'react-icons/fi'
 
+import { db } from '../db'
+import {
+  createMobilePanelHistory,
+  MobilePanelView,
+} from '../hooks/panel-history'
+
+import EdgeListeningHelp from './EdgeListeningHelp'
+import PreparationStatus from './PreparationStatus'
 import QuietBookmarks, {
   BookmarkParagraph,
   sameBookmark,
 } from './QuietBookmarks'
+import { resolveListeningAppearance, savedReaderAppearance } from './appearance'
+import type { ListeningAppearance } from './appearance'
 import { chapterForBookmark, resolveListeningChapter } from './chapters'
 import {
   buildQuietSession,
   getBookmarkParagraphs,
   getListeningParagraphs,
 } from './document'
+import type { ListeningPreparationProgress } from './epub'
 import {
   LibraryBookmarkChange,
   loadLibraryListeningBook,
   loadQuietLaunch,
   saveLibraryBookmark,
+  retryListeningPreparation,
   undoLibraryBookmark,
 } from './integrated'
 import type { ListeningMarker, LoadedListeningBook } from './integrated'
@@ -79,6 +101,8 @@ export default function QuietListeningDocument({
   bookId: string
   sessionId?: string
 }) {
+  const router = useRouter()
+  const mobile = useMediaQuery('(max-width: 640px)')
   const [session, setSession] = useState<QuietSession>()
   const [loadError, setLoadError] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -88,6 +112,29 @@ export default function QuietListeningDocument({
   const [notice, setNotice] = useState('')
   const [undo, setUndo] = useState<LibraryBookmarkChange>()
   const [listSection, setListSection] = useState('')
+  const [appearance, setAppearance] = useState<ListeningAppearance>()
+  const [progress, setProgress] = useState<ListeningPreparationProgress>()
+  const [retry, setRetry] = useState(0)
+  const [toast, setToast] = useState(false)
+  const [bookmarkListOpen, setBookmarkListOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const panel = useRef<ReturnType<typeof createMobilePanelHistory>>()
+  const panelView = useRef<MobilePanelView>({ bookId, navbar: false })
+  panelView.current = {
+    bookId,
+    navbar: false,
+    action: !toolsOpen
+      ? undefined
+      : bookmarkListOpen
+      ? 'bookmark-list'
+      : helpOpen
+      ? 'help'
+      : 'tools',
+  }
+  const retryPreparation = useCallback(() => {
+    retryListeningPreparation(bookId)
+    setRetry((value) => value + 1)
+  }, [bookId])
   const articleHost = useRef<HTMLDivElement>(null)
   const toolsSummary = useRef<HTMLElement>(null)
   const saveInFlight = useRef(false)
@@ -100,16 +147,71 @@ export default function QuietListeningDocument({
   }`
 
   useEffect(() => {
+    if (!mobile || !router.isReady) return
+    const history = createMobilePanelHistory(
+      window.history,
+      () => window.location.pathname + window.location.search,
+      () => panelView.current,
+      (view) => {
+        panelView.current = view
+        setToolsOpen(!!view.action)
+        setBookmarkListOpen(view.action === 'bookmark-list')
+        setHelpOpen(view.action === 'help')
+        toolsSummary.current?.focus()
+      },
+      (previous, next) =>
+        previous.action === 'tools' &&
+        ['bookmark-list', 'help'].includes(next.action || ''),
+    )
+    panel.current = history
+    const onPop = (event: PopStateEvent) => history.restore(event.state)
+    router.beforePopState((state) => !history.restore(state))
+    window.addEventListener('popstate', onPop)
+    history.sync(panelView.current)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      router.beforePopState(() => true)
+      panel.current = undefined
+    }
+  }, [bookId, mobile, router, router.isReady, sessionId])
+
+  useEffect(() => {
+    panel.current?.sync(panelView.current)
+  }, [toolsOpen, bookmarkListOpen, helpOpen])
+
+  useEffect(() => {
     let active = true
+    const controller = new AbortController()
     mounted.current = true
+    setLoadError('')
+    setProgress(undefined)
     async function load() {
+      const options = {
+        signal: controller.signal,
+        onProgress: (next: ListeningPreparationProgress) => {
+          if (active) setProgress(next)
+        },
+      }
       const launch = sessionId
-        ? await loadQuietLaunch(bookId, sessionId)
-        : await loadLibraryListeningBook(bookId)
+        ? await loadQuietLaunch(bookId, sessionId, options)
+        : await loadLibraryListeningBook(bookId, options)
       const prepared = buildQuietSession(launch.book, launch.record)
       // Keep the launch immutable, but show the bookmark for the NEXT session.
-      const latest = sessionId ? await loadLibraryListeningBook(bookId) : launch
+      // The fingerprint is already verified. Read metadata instead of hashing
+      // and loading the full EPUB a second time before showing its prose.
+      const latest = sessionId ? await db?.listening.get(bookId) : launch.record
+      const metadata = await db?.books.get(bookId)
+      const reading = savedReaderAppearance()
       if (!active) return
+      setAppearance(
+        launch.appearance ||
+          resolveListeningAppearance(
+            launch.record.appearance,
+            reading.settings,
+            metadata?.configuration?.typography,
+            reading.dark,
+          ),
+      )
       loadedBook.current = launch.book
       fingerprint.current = launch.record.fingerprint
       launchEnd.current = {
@@ -121,8 +223,9 @@ export default function QuietListeningDocument({
         ).title,
       }
       setSaved(
-        latest.record.startAt === 'marker'
-          ? bookmarkedParagraph(launch.book, latest.record.marker)
+        latest?.fingerprint === launch.record.fingerprint &&
+          latest.startAt === 'marker'
+          ? bookmarkedParagraph(launch.book, latest.marker)
           : undefined,
       )
       setSession(prepared)
@@ -138,9 +241,10 @@ export default function QuietListeningDocument({
     })
     return () => {
       active = false
+      controller.abort()
       mounted.current = false
     }
-  }, [bookId, sessionId])
+  }, [bookId, retry, sessionId])
 
   const paragraphs = useMemo(
     () =>
@@ -184,6 +288,7 @@ export default function QuietListeningDocument({
         savedAt: Date.now(),
       }
       const chapter = chapterForBookmark(book, marker)
+      marker.chapterTitle = chapter.title
       const change = await saveLibraryBookmark(
         bookId,
         marker,
@@ -193,16 +298,19 @@ export default function QuietListeningDocument({
       if (!mounted.current) return
       setSaved({ ...paragraph, chapterTitle: chapter.title })
       setUndo(change)
+      setToast(true)
       setNotice(
         `Bookmark saved. Your next session starts in ${chapter.title} and continues through ${end.title}.`,
       )
     } catch (error) {
-      if (mounted.current)
+      if (mounted.current) {
+        setToast(true)
         setSaveError(
           error instanceof Error
             ? error.message
             : 'The bookmark could not be saved. Please try again.',
         )
+      }
     } finally {
       saveInFlight.current = false
       if (mounted.current) setSaving(false)
@@ -227,11 +335,13 @@ export default function QuietListeningDocument({
           : undefined,
       )
       setUndo(undefined)
+      setToast(true)
       setNotice(
         'Bookmark undone. Your previous listening start and range are restored.',
       )
     } catch (error) {
       if (mounted.current) {
+        setToast(true)
         setUndo(undefined)
         setSaveError(
           error instanceof Error
@@ -256,7 +366,20 @@ export default function QuietListeningDocument({
   }
 
   return (
-    <main className="flow-quiet">
+    <main
+      className="flow-quiet"
+      data-quiet-theme={appearance?.theme || 'light'}
+      style={
+        appearance
+          ? ({
+              '--quiet-font-size': `${appearance.fontSize}px`,
+              '--quiet-line-height': appearance.lineHeight,
+              '--quiet-font-family': appearance.fontFamily,
+              '--quiet-font-weight': appearance.fontWeight,
+            } as CSSProperties)
+          : undefined
+      }
+    >
       <Head>
         <title>
           {session ? `${session.title} · Flow` : 'Quiet document · Flow'}
@@ -276,27 +399,8 @@ export default function QuietListeningDocument({
             {toolsOpen && (
               <div className="flow-quiet-panel">
                 <h1>{session.title}</h1>
-                <p>Start Read aloud from Edge’s menu.</p>
-                <p className="flow-quiet-muted">
-                  On Android, Edge’s menu controls Read aloud. If an installed
-                  view hides that menu, open this same quiet document URL in the
-                  Edge browser. Use the same Edge profile where you imported the
-                  book.
-                </p>
-                <p className="flow-quiet-muted">
-                  Return to the book to change the range or use notes and other
-                  reading tools. Close these tools before listening.
-                </p>
-                <div className="flow-quiet-actions">
-                  <a href={returnHref}>Edit session in Flow</a>
-                </div>
                 <div className="flow-quiet-marker-tools">
                   <h2>Bookmark</h2>
-                  <p>
-                    Pause Read aloud in Edge, then tap the bookmark before a
-                    paragraph to set your next listening start. This document’s
-                    text and current session stay unchanged.
-                  </p>
                   {saved && (
                     <div className="flow-quiet-choice">
                       <p className="flow-quiet-label">
@@ -319,7 +423,21 @@ export default function QuietListeningDocument({
                       )}
                     </div>
                   )}
-                  <details className="flow-quiet-paragraph-list">
+                  {!saved && (
+                    <p>
+                      No saved listening Bookmark yet. Pause Edge, then use a
+                      paragraph’s Bookmark icon or the list below to save your
+                      next start.
+                    </p>
+                  )}
+                  <details
+                    className="flow-quiet-paragraph-list"
+                    open={bookmarkListOpen}
+                    onToggle={(event) => {
+                      setBookmarkListOpen(event.currentTarget.open)
+                      if (event.currentTarget.open) setHelpOpen(false)
+                    }}
+                  >
                     <summary>Bookmark from a list</summary>
                     <label htmlFor="flow-quiet-chapter">Chapter</label>
                     <select
@@ -356,11 +474,35 @@ export default function QuietListeningDocument({
                     </ol>
                   </details>
                 </div>
+                <details
+                  className="flow-quiet-help"
+                  open={helpOpen}
+                  onToggle={(event) => {
+                    setHelpOpen(event.currentTarget.open)
+                    if (event.currentTarget.open) setBookmarkListOpen(false)
+                  }}
+                >
+                  <summary>Read aloud help and appearance</summary>
+                  <EdgeListeningHelp />
+                  <p>
+                    Pause Edge before saving a Bookmark. It sets the next
+                    session’s start; it does not follow Edge’s spoken position
+                    or replace the active text.
+                  </p>
+                  <p>
+                    Appearance: {appearance?.fontSize || 22}px text ·{' '}
+                    {appearance?.theme || 'light'} theme. Change the next view’s
+                    appearance in listening setup.
+                  </p>
+                  <a href={returnHref}>Review range and next-view appearance</a>
+                </details>
                 <button
                   type="button"
                   className="flow-quiet-close"
                   onClick={() => {
                     setToolsOpen(false)
+                    setBookmarkListOpen(false)
+                    setHelpOpen(false)
                     toolsSummary.current?.focus()
                   }}
                 >
@@ -376,6 +518,14 @@ export default function QuietListeningDocument({
           <h1>This listening session needs attention</h1>
           <p>{loadError}</p>
           <p>Return to Flow to review the book, range and bookmark.</p>
+          <p>
+            Books are stored in the browser profile where you imported them.
+            Open this link there, or import the EPUB in this browser before
+            preparing a new session.
+          </p>
+          <button type="button" onClick={retryPreparation}>
+            Retry preparation
+          </button>
           <a href={returnHref}>Review this book in Flow</a>
           <a href="/">Return to Flow library</a>
         </section>
@@ -392,7 +542,7 @@ export default function QuietListeningDocument({
             />
           </div>
           <footer className="flow-quiet-bookmark-status">
-            <p role="status">
+            <p>
               {saving
                 ? 'Saving bookmark…'
                 : notice ||
@@ -413,9 +563,36 @@ export default function QuietListeningDocument({
           </footer>
         </>
       ) : (
-        <p className="flow-quiet-loading" role="status">
-          Preparing the quiet document…
-        </p>
+        <section className="flow-quiet-loading">
+          <PreparationStatus
+            key={retry}
+            progress={progress}
+            onRetry={retryPreparation}
+          />
+        </section>
+      )}
+      {session && toast && (
+        <aside
+          className="flow-quiet-save-toast"
+          aria-label="Bookmark feedback"
+          data-nosnippet
+        >
+          <p role={saveError ? 'alert' : 'status'}>
+            {saveError || (undo ? 'Bookmark saved for next time.' : notice)}
+          </p>
+          {undo && (
+            <button type="button" disabled={saving} onClick={undoBookmark}>
+              Undo
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setToast(false)}
+            aria-label="Dismiss Bookmark feedback"
+          >
+            Dismiss
+          </button>
+        </aside>
       )}
     </main>
   )
