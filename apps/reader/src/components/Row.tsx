@@ -21,6 +21,7 @@ interface RowProps extends ComponentProps<'div'> {
   onActivate?: () => void
   onDelete?: () => void
   badge?: boolean
+  rowHeight?: number
 }
 export const Row: React.FC<RowProps> = ({
   title,
@@ -38,6 +39,7 @@ export const Row: React.FC<RowProps> = ({
   badge,
   onClick,
   onDelete,
+  rowHeight = LIST_ITEM_SIZE,
   ...props
 }) => {
   const trans = useTranslation()
@@ -61,10 +63,28 @@ export const Row: React.FC<RowProps> = ({
       style={{
         paddingLeft: depth * 8,
         paddingRight: 12,
-        height: LIST_ITEM_SIZE,
+        height: rowHeight,
       }}
       title={title}
       onClick={onClick ?? toggle}
+      role={onClick || toggle ? 'button' : undefined}
+      tabIndex={onClick || toggle ? 0 : undefined}
+      aria-current={active ? 'location' : undefined}
+      aria-expanded={childCount ? expanded : undefined}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          event.currentTarget.click()
+        } else if (
+          childCount &&
+          ((event.key === 'ArrowRight' && !expanded) ||
+            (event.key === 'ArrowLeft' && expanded))
+        ) {
+          event.preventDefault()
+          toggle?.()
+        }
+      }}
       {...props}
     >
       <StateLayer />
@@ -114,6 +134,7 @@ export const Row: React.FC<RowProps> = ({
           <IconButton
             className="action hidden"
             Icon={MdClose}
+            aria-label={`Remove ${title || label || 'item'}`}
             onClick={(e) => {
               e.stopPropagation()
               onDelete?.()

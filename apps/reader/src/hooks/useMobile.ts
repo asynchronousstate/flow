@@ -6,20 +6,17 @@ export const mobileState = atom<boolean | undefined>({
   default: undefined,
 })
 
-let listened = false
-
 export function useMobile() {
   const [mobile, setMobile] = useRecoilState(mobileState)
 
   useEffect(() => {
-    if (listened) return
-    listened = true
-
     const mq = window.matchMedia('(max-width: 640px)')
+    const update = (event: MediaQueryListEvent) => setMobile(event.matches)
     setMobile(mq.matches)
-    mq.addEventListener('change', (e) => {
-      setMobile(e.matches)
-    })
+    mq.addEventListener('change', update)
+    // A new RecoilRoot must receive the current viewport, even after a client
+    // route has unmounted the previous reader. Each consumer cleans its listener.
+    return () => mq.removeEventListener('change', update)
   }, [setMobile])
 
   return mobile

@@ -2,7 +2,13 @@ import { useState, useEffect, useMemo } from 'react'
 import Highlighter from 'react-highlight-words'
 import { VscCollapseAll, VscExpandAll } from 'react-icons/vsc'
 
-import { useAction, useList, useTranslation } from '@flow/reader/hooks'
+import {
+  useAction,
+  useList,
+  useMobile,
+  useSetAction,
+  useTranslation,
+} from '@flow/reader/hooks'
 import {
   flatTree,
   IMatch,
@@ -10,9 +16,14 @@ import {
   reader,
 } from '@flow/reader/models'
 
+import { scale } from '../../platform'
 import { TextField } from '../Form'
 import { Row } from '../Row'
 import { PaneViewProps, PaneView } from '../base'
+import { searchExcerpt } from '../search-excerpt'
+
+const SEARCH_ITEM_SIZE = scale(56, 72)
+const searchScrollOffsets = new Map<string, number>()
 
 // When inputting with IME and storing state in `valtio`,
 // unexpected rendering with `e.target.value === ''` occurs,
@@ -65,6 +76,7 @@ export const SearchView: React.FC<PaneViewProps> = (props) => {
           <TextField
             as="input"
             name="keyword"
+            aria-label="Search in this book"
             autoFocus={action === 'search'}
             hideLabel
             value={keyword}
@@ -74,7 +86,12 @@ export const SearchView: React.FC<PaneViewProps> = (props) => {
           />
         </div>
         {keyword && results && (
-          <ResultList results={results as IMatch[]} keyword={keyword} />
+          <ResultList
+            results={results as IMatch[]}
+            keyword={keyword}
+            bookId={focusedBookTab?.id ?? ''}
+            visible={action === 'search'}
+          />
         )}
       </div>
     </PaneView>
@@ -84,14 +101,30 @@ export const SearchView: React.FC<PaneViewProps> = (props) => {
 interface ResultListProps {
   results: IMatch[]
   keyword: string
+  bookId: string
+  visible: boolean
 }
-const ResultList: React.FC<ResultListProps> = ({ results, keyword }) => {
+const ResultList: React.FC<ResultListProps> = ({
+  results,
+  keyword,
+  bookId,
+  visible,
+}) => {
   const rows = useMemo(
     () => results.flatMap((r) => flatTree(r)) ?? [],
     [results],
   )
-  const { outerRef, innerRef, items } = useList(rows)
+  const { outerRef, innerRef, items } = useList(rows, SEARCH_ITEM_SIZE)
   const t = useTranslation('search')
+  const positionKey = JSON.stringify([bookId, keyword])
+  useEffect(() => {
+    if (!visible) return
+    const frame = requestAnimationFrame(() => {
+      if (outerRef.current)
+        outerRef.current.scrollTop = searchScrollOffsets.get(positionKey) ?? 0
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [visible, positionKey, outerRef])
 
   const sectionCount = results.length
   const resultCount = results.reduce((a, r) => r.subitems!.length + a, 0)
@@ -103,7 +136,16 @@ const ResultList: React.FC<ResultListProps> = ({ results, keyword }) => {
           .replace('{n}', '' + resultCount)
           .replace('{m}', '' + sectionCount)}
       </div>
-      <div ref={outerRef} className="scroll">
+      <div
+        ref={outerRef}
+        className="scroll"
+        onScroll={(event) => {
+          if (!visible) return
+          searchScrollOffsets.set(positionKey, event.currentTarget.scrollTop)
+          if (searchScrollOffsets.size > 30)
+            searchScrollOffsets.delete(searchScrollOffsets.keys().next().value!)
+        }}
+      >
         <div ref={innerRef}>
           {items.map(({ index }) => (
             <ResultRow key={index} result={rows[index]} keyword={keyword} />
@@ -119,17 +161,21 @@ interface ResultRowProps {
   keyword: string
 }
 const ResultRow: React.FC<ResultRowProps> = ({ result, keyword }) => {
+  const mobile = useMobile()
+  const setAction = useSetAction()
   if (!result) return null
   const { cfi, depth, expanded, subitems, id } = result
   let { excerpt, description } = result
   const tab = reader.focusedBookTab
   const isResult = depth === 1
 
-  excerpt = excerpt.trim()
+  excerpt = searchExcerpt(excerpt, keyword)
   description = description?.trim()
 
   return (
     <Row
+      className="flow-search-row"
+      rowHeight={SEARCH_ITEM_SIZE}
       title={description ? `${description} / ${excerpt}` : excerpt}
       label={excerpt}
       description={description}
@@ -143,6 +189,7 @@ const ResultRow: React.FC<ResultRowProps> = ({ result, keyword }) => {
           if (tab) {
             tab.activeResultID = id
             tab.display(cfi)
+            if (mobile) setAction(undefined)
           }
         },
       })}

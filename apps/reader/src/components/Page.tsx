@@ -11,14 +11,15 @@ export const Page: React.FC<PageProps> = ({
   ...props
 }) => {
   return (
-    <div className={clsx('p-4', className)} {...props}>
-      <h1
-        className={clsx(
-          'typescale-title-large text-on-surface-variant mb-4',
-          className,
-        )}
-        {...props}
-      >
+    <div
+      className={clsx(
+        'h-full min-h-0 overflow-y-auto overscroll-contain p-4',
+        className,
+      )}
+      {...props}
+      style={{ touchAction: 'pan-y', ...props.style }}
+    >
+      <h1 className="typescale-title-large text-on-surface-variant mb-4">
         {headline}
       </h1>
       {children}

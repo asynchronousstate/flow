@@ -21,6 +21,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ actions, className }) => {
         <li key={id} title={title}>
           <IconButton
             Icon={Icon}
+            title={title}
             onClick={(e) => {
               e.stopPropagation()
               handle()

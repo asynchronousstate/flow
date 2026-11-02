@@ -2,6 +2,8 @@ import './styles.css'
 import '../listening/listening.css'
 import '../listening/integrated.css'
 import '../listening/quiet.css'
+import '../components/reader-v23.css'
+import '../library/library.css'
 import 'react-photo-view/dist/react-photo-view.css'
 
 import { LiteralProvider } from '@literal-ui/core'

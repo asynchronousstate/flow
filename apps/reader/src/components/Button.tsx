@@ -14,7 +14,12 @@ export function IconButton({
   ...props
 }: IconButtonProps) {
   return (
-    <button className={clsx('relative block p-0.5', className)} {...props}>
+    <button
+      type="button"
+      aria-label={props['aria-label'] ?? props.title}
+      className={clsx('relative block p-0.5', className)}
+      {...props}
+    >
       <StateLayer />
       <Icon size={size} />
     </button>

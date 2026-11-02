@@ -81,6 +81,8 @@ function loadHook() {
   )
   return {
     main,
+    canTurnReaderPage: module.exports.canTurnReaderPage,
+    isReaderViewportZoomed: module.exports.isReaderViewportZoomed,
     mount(target, options) {
       module.exports.useDisablePinchZooming(target, options)
       assert.equal(effects.length, 1)
@@ -97,6 +99,65 @@ function allowed(event, description) {
 }
 
 const cases = [
+  [
+    'reader can keep one-finger page swipes while leaving pinch gestures native',
+    () => {
+      const { main, mount } = loadHook()
+      const frame = { document: documentTarget() }
+      const cleanup = mount(frame, { preventPan: true, preventPinch: false })
+      assert.equal(frame.document.move(1).defaultPrevented, true)
+      allowed(frame.document.move(2), 'Reader canceled native two-finger zoom')
+      allowed(frame.document.move(3), 'Reader canceled native multi-touch zoom')
+      allowed(main.document.move(1), 'Reader option changed the outer document')
+      cleanup()
+    },
+  ],
+  [
+    'zoomed reader and parent viewports allow native panning without page turns',
+    () => {
+      const { mount, canTurnReaderPage, isReaderViewportZoomed } = loadHook()
+      const frame = {
+        document: documentTarget(),
+        visualViewport: { scale: 1 },
+        parent: { visualViewport: { scale: 1 } },
+      }
+      const cleanup = mount(frame, { preventPan: true, preventPinch: false })
+      assert.equal(canTurnReaderPage(frame, 1), true)
+      assert.equal(canTurnReaderPage(frame, 2), false)
+      assert.equal(canTurnReaderPage(frame, 0), false)
+      frame.parent.visualViewport.scale = 2
+      assert.equal(isReaderViewportZoomed(frame), true)
+      assert.equal(canTurnReaderPage(frame, 1), false)
+      allowed(
+        frame.document.move(1),
+        'Zoomed parent cannot pan the reading view',
+      )
+      allowed(frame.document.move(2), 'Zoomed parent cannot continue pinching')
+      frame.parent.visualViewport.scale = 1
+      frame.visualViewport.scale = 1.5
+      allowed(frame.document.move(1), 'Zoomed iframe cannot pan')
+      frame.visualViewport.scale = 1
+      assert.equal(canTurnReaderPage(frame, 1), true)
+      assert.equal(frame.document.move(1).defaultPrevented, true)
+      cleanup()
+    },
+  ],
+  [
+    'a restricted parent viewport does not break reader gesture handling',
+    () => {
+      const { isReaderViewportZoomed, canTurnReaderPage } = loadHook()
+      const frame = { visualViewport: { scale: 1 } }
+      Object.defineProperty(frame, 'parent', {
+        get() {
+          throw new Error('Restricted parent')
+        },
+      })
+      assert.equal(isReaderViewportZoomed(frame), false)
+      assert.equal(canTurnReaderPage(frame, 1), true)
+      frame.visualViewport.scale = 2
+      assert.equal(canTurnReaderPage(frame, 1), false)
+    },
+  ],
   [
     'single-finger drag and post-pinch continuation remain native-scrollable',
     () => {

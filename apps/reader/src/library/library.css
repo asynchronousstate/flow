@@ -1,0 +1,236 @@
+.flow-library {
+  display: block;
+  min-height: 0;
+  padding: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: rgb(var(--md-sys-color-on-surface));
+}
+
+.flow-library h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.flow-library p {
+  margin: 0;
+  padding: 0;
+}
+
+.flow-library-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px 20px;
+  margin-bottom: 16px;
+}
+
+.flow-library-local-note {
+  max-width: 62ch;
+  font-size: 13px;
+  color: rgb(var(--md-sys-color-on-surface-variant));
+}
+
+.flow-library-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flow-library-controls > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.flow-library-controls button,
+.flow-library-review button {
+  min-height: 44px;
+}
+
+.flow-library-scroll {
+  min-height: 0;
+  overflow: visible;
+  padding: 4px 4px 20px;
+  overscroll-behavior: contain;
+}
+
+.flow-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+  gap: 20px;
+}
+
+.flow-library-card {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid rgb(var(--md-sys-color-outline) / 22%);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.flow-library-cover {
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.flow-library-cover img {
+  width: 100%;
+  min-height: 120px;
+}
+
+.flow-library-cover:disabled {
+  cursor: wait;
+}
+
+.flow-library-card-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.flow-library-card h2 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.flow-library-author,
+.flow-library-availability,
+.flow-library-context-note {
+  color: rgb(var(--md-sys-color-on-surface-variant));
+  font-size: 12px;
+}
+
+.flow-library-author {
+  margin-top: 4px !important;
+}
+
+.flow-library-availability {
+  margin-top: 8px !important;
+}
+
+.flow-library-resume {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.flow-library-resume dt {
+  font-weight: 600;
+}
+
+.flow-library-resume dd {
+  margin: 0;
+}
+
+.flow-library-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 3px !important;
+}
+
+.flow-library-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.flow-library-actions button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: 4px;
+  background: rgb(var(--md-sys-color-primary-container));
+  color: rgb(var(--md-sys-color-on-primary-container));
+}
+
+.flow-library-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.flow-library button:focus-visible,
+.flow-library input:focus-visible {
+  outline: 2px solid rgb(var(--md-sys-color-primary));
+  outline-offset: 3px;
+}
+
+.flow-library-review,
+.flow-library-empty {
+  border: 1px solid rgb(var(--md-sys-color-outline) / 30%);
+  border-radius: 5px;
+  padding: 16px;
+  margin-bottom: 16px;
+  display: grid;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.flow-library-review h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.flow-library-notice {
+  padding: 10px 0 !important;
+  font-size: 14px;
+}
+
+.flow-library-error {
+  color: rgb(var(--md-sys-color-error, 160 40 40));
+  grid-column: 1 / -1;
+  font-size: 13px;
+}
+
+.flow-backup-review-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 20px;
+  background: rgb(0 0 0 / 40%);
+}
+
+.flow-backup-review {
+  width: min(100%, 560px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  background: rgb(var(--md-sys-color-surface, 255 255 255));
+  color: rgb(var(--md-sys-color-on-surface, 25 35 40));
+}
+
+.flow-backup-review-overlay > div {
+  width: min(100%, 560px);
+}
+
+@media (max-width: 480px) {
+  .flow-library {
+    padding: 16px 12px;
+  }
+
+  .flow-library-card {
+    padding: 14px;
+    gap: 12px;
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+}

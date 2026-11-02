@@ -1,8 +1,8 @@
-# Flow Listening v2 on Vercel
+# Flow Listening 2.3 on Vercel
 
 Production: https://flow-listening-v2.vercel.app
 
-Latest GitHub release: https://github.com/asynchronousstate/flow/releases/tag/v2.2.0
+Latest GitHub release: https://github.com/asynchronousstate/flow/releases/tag/v2.3.0
 
 This project deploys the integrated Next.js reader in `apps/reader`. The earlier
 standalone PWA remains at `flow-listening.vercel.app`; its static-export script

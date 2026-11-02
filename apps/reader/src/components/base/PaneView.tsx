@@ -26,13 +26,23 @@ export const Pane = forwardRef<HTMLDivElement, PaneProps>(function Pane(
     <div
       className={clsx('Pane scroll-parent group', size && 'shrink-0')}
       style={{
-        height: expanded ? size : 24,
+        height: expanded ? size : scale(28, 48),
       }}
     >
       <div
         role="button"
-        className="flex h-6 shrink-0 items-center"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={headline}
+        className="flow-reader-pane-title flex shrink-0 items-center"
         onClick={() => setExpanded((e) => !e)}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            setExpanded((value) => !value)
+          }
+        }}
       >
         <Twisty expanded={expanded} />
         <div

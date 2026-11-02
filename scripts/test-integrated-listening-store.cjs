@@ -24,6 +24,19 @@ const compiled = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     module: ts.ModuleKind.CommonJS,
   },
 }).outputText
+const appearancePath = path.resolve(
+  __dirname,
+  '../apps/reader/src/listening/appearance.ts',
+)
+const compiledAppearance = ts.transpileModule(
+  fs.readFileSync(appearancePath, 'utf8'),
+  {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2020,
+      module: ts.ModuleKind.CommonJS,
+    },
+  },
+).outputText
 
 function deferredGate() {
   let enter
@@ -143,11 +156,15 @@ function harness() {
   const db = new MemoryDatabase()
   const dependencies = {
     prepareGate: undefined,
+    prepareError: undefined,
     prepared: 0,
     validated: [],
     book: clone(fixtureBook),
     rangeProblem: '',
     rangesValidated: [],
+    preferences: new Map(),
+    darkMode: false,
+    timings: [],
   }
   const controlled = {
     '../db': { db },
@@ -179,11 +196,21 @@ function harness() {
       },
     },
     './epub': {
-      async prepareListeningBook() {
+      async prepareListeningBook(_data, options = {}) {
         dependencies.prepared++
+        assert.equal(
+          options.signal,
+          undefined,
+          'A consumer signal must not cancel a shared parse',
+        )
         const gate = dependencies.prepareGate
         dependencies.prepareGate = undefined
+        const error = dependencies.prepareError
+        dependencies.prepareError = undefined
+        options.onProgress?.({ stage: 'chapters', completed: 1, total: 4 })
         if (gate) await gate.block()
+        if (error) throw error
+        options.onProgress?.({ stage: 'chapters', completed: 4, total: 4 })
         return clone(dependencies.book)
       },
     },
@@ -199,7 +226,27 @@ function harness() {
     },
   }
   const module = { exports: {} }
-  const context = vm.createContext({ crypto: webcrypto })
+  const context = vm.createContext({
+    crypto: webcrypto,
+    AbortController,
+    localStorage: {
+      getItem: (key) => dependencies.preferences.get(key) ?? null,
+    },
+    matchMedia: () => ({ matches: dependencies.darkMode }),
+    console: { info: (...parts) => dependencies.timings.push(clone(parts)) },
+  })
+  const appearanceModule = { exports: {} }
+  new vm.Script(
+    `(function(require, module, exports) {\n${compiledAppearance}\n})`,
+    { filename: appearancePath },
+  ).runInContext(context)(
+    (name) => {
+      throw new Error('Unexpected appearance runtime dependency: ' + name)
+    },
+    appearanceModule,
+    appearanceModule.exports,
+  )
+  controlled['./appearance'] = appearanceModule.exports
   const run = new vm.Script(
     `(function(require, module, exports) {\n${compiled}\n})`,
     {
@@ -715,9 +762,347 @@ test('setup does not create a default plan when every TOC entry is unavailable',
   assert.equal(await db.listening.get('book-a'), undefined)
 })
 
+test('already-canceled preparation does not read, parse or create a default plan', async () => {
+  const { db, api, dependencies } = harness()
+  await seed(db)
+  const before = clone(db.writes)
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(
+    api.loadLibraryListeningBook('book-a', { signal: controller.signal }),
+    (error) => error.name === 'AbortError',
+  )
+  assert.equal(dependencies.prepared, 0)
+  assert.equal(await db.listening.get('book-a'), undefined)
+  same(db.writes, before)
+})
+
+test('canceling pending preparation rejects promptly without creating a plan, and the shared result remains retryable', async () => {
+  const { db, api, dependencies } = harness()
+  await seed(db)
+  const gate = deferredGate()
+  dependencies.prepareGate = gate
+  const controller = new AbortController()
+  const progress = []
+  const loading = api.loadLibraryListeningBook('book-a', {
+    signal: controller.signal,
+    onProgress: (value) => progress.push(clone(value)),
+  })
+  await gate.entered
+  const rejected = assert.rejects(
+    loading,
+    (error) => error.name === 'AbortError',
+  )
+  controller.abort()
+  await rejected // Must settle while parsing is still held by the gate.
+  assert.equal(await db.listening.get('book-a'), undefined)
+  const reported = progress.length
+  gate.release()
+  const retry = await api.loadLibraryListeningBook('book-a')
+  assert.equal(retry.record.from, 'OPS/I.xhtml')
+  assert.equal(
+    dependencies.prepared,
+    1,
+    'Canceled consumers must not poison the reusable parse',
+  )
+  assert.equal(
+    progress.length,
+    reported,
+    'Canceled progress subscriber was not removed',
+  )
+})
+
+test('one consumer abort does not poison another consumer of the same EPUB preparation', async () => {
+  const { db, api, dependencies } = harness()
+  await seed(db)
+  const gate = deferredGate()
+  dependencies.prepareGate = gate
+  const firstController = new AbortController()
+  const first = api.loadLibraryListeningBook('book-a', {
+    signal: firstController.signal,
+  })
+  await gate.entered
+  let joined
+  const joinedPromise = new Promise((resolve) => {
+    joined = resolve
+  })
+  const progress = []
+  const second = api.loadLibraryListeningBook('book-a', {
+    onProgress: (value) => {
+      progress.push(clone(value))
+      if (value.stage === 'chapters') joined()
+    },
+  })
+  await joinedPromise
+  const rejected = assert.rejects(first, (error) => error.name === 'AbortError')
+  firstController.abort()
+  await rejected
+  assert.equal(await db.listening.get('book-a'), undefined)
+  gate.release()
+  const completed = await second
+  assert.equal(completed.record.through, 'OPS/IV.xhtml')
+  assert.equal(dependencies.prepared, 1)
+  assert(progress.some((value) => value.stage === 'ready'))
+  assert.equal(dependencies.timings.length, 1)
+  assert.equal(JSON.parse(dependencies.timings[0][1]).reused, true)
+})
+
+test('explicit Retry starts a fresh parse without waiting for the old one, isolates books, and survives the old failure', async () => {
+  const { db, api, dependencies } = harness()
+  await seed(db, 'book-a')
+  await seed(db, 'book-a-other') // Same bytes, similar ID: cache isolation must use book identity.
+  const other = await api.loadLibraryListeningBook('book-a-other')
+  assert.equal(dependencies.prepared, 1)
+  const oldGate = deferredGate()
+  dependencies.prepareGate = oldGate
+  dependencies.prepareError = new Error('Old controlled parse failure')
+  const controller = new AbortController()
+  const old = api.loadLibraryListeningBook('book-a', {
+    signal: controller.signal,
+  })
+  await oldGate.entered
+  let joined
+  const joinedPromise = new Promise((resolve) => {
+    joined = resolve
+  })
+  const existingConsumer = api.loadLibraryListeningBook('book-a', {
+    onProgress: (progress) => {
+      if (progress.stage === 'chapters') joined()
+    },
+  })
+  await joinedPromise
+  assert.equal(dependencies.prepared, 2)
+
+  api.retryListeningPreparation('book-a')
+  // This must resolve while oldGate remains closed; otherwise Retry has only
+  // reattached to the stuck old promise and the controlled test times out.
+  const fresh = await api.loadLibraryListeningBook('book-a')
+  assert.equal(dependencies.prepared, 3)
+  same(
+    (await api.loadLibraryListeningBook('book-a-other')).record,
+    other.record,
+  )
+  assert.equal(dependencies.prepared, 3, 'Retry evicted another book’s parse')
+  const aborted = assert.rejects(old, (error) => error.name === 'AbortError')
+  controller.abort()
+  await aborted
+  const oldFailed = assert.rejects(
+    existingConsumer,
+    /Old controlled parse failure/,
+  )
+  oldGate.release()
+  await oldFailed // The original promise and its guarded cache cleanup settled.
+
+  same((await api.loadLibraryListeningBook('book-a')).record, fresh.record)
+  same(
+    (await api.loadLibraryListeningBook('book-a-other')).record,
+    other.record,
+  )
+  assert.equal(
+    dependencies.prepared,
+    3,
+    'Old completion evicted the newer successful parse',
+  )
+  assert.equal(
+    db.writes.filter(
+      (write) => write.table === 'listening' && write.key === 'book-a',
+    ).length,
+    1,
+    'An obsolete attempt rewrote the newly prepared plan',
+  )
+})
+
+test('canceling during the final plan read cannot create default listening metadata', async () => {
+  const { db, api } = harness()
+  await seed(db)
+  const gate = db.listening.pauseNextGet()
+  const controller = new AbortController()
+  const loading = api.loadLibraryListeningBook('book-a', {
+    signal: controller.signal,
+  })
+  await gate.entered
+  const rejected = assert.rejects(
+    loading,
+    (error) => error.name === 'AbortError',
+  )
+  controller.abort()
+  gate.release()
+  await rejected
+  assert.equal(await db.listening.get('book-a'), undefined)
+})
+
+test('a failed parse is evicted for retry while the existing chapter range, Bookmark and appearance stay unchanged', async () => {
+  const { db, api, dependencies } = harness()
+  await seed(db)
+  const saved = {
+    bookId: 'book-a',
+    fingerprint: fingerprint('EPUB revision A'),
+    from: 'OPS/II.xhtml',
+    through: 'OPS/IV.xhtml',
+    startAt: 'marker',
+    marker: marker(),
+    appearance: { preset: 'large', theme: 'sepia' },
+    updatedAt: 123,
+  }
+  await db.listening.put(saved)
+  const beforeWrites = clone(db.writes)
+  dependencies.prepareError = new Error('Controlled EPUB parse failure')
+  await assert.rejects(
+    api.loadLibraryListeningBook('book-a'),
+    /Controlled EPUB parse failure/,
+  )
+  same(await db.listening.get('book-a'), saved)
+  const retried = await api.loadLibraryListeningBook('book-a')
+  assert.equal(dependencies.prepared, 2)
+  same(retried.record, saved)
+  same(db.writes, beforeWrites, 'Retry changed saved listening choices')
+  const lastTiming = JSON.parse(dependencies.timings.at(-1)[1])
+  assert.equal(lastTiming.reused, false)
+  assert(lastTiming.durationMs >= 0)
+  same(
+    Object.keys(lastTiming).sort(),
+    ['durationMs', 'reused'],
+    'Timing diagnostics must not contain book text or identifiers',
+  )
+})
+
+test('launch appearance resolves real reader preferences once and stays detached from later global, book and plan edits', async () => {
+  const { db, api, dependencies } = harness()
+  await seed(db)
+  const metadata = await db.books.get('book-a')
+  metadata.configuration.typography = {
+    fontSize: '150%',
+    lineHeight: 2.1,
+    fontWeight: undefined,
+  }
+  await db.books.put(metadata)
+  dependencies.preferences.set(
+    'settings',
+    JSON.stringify({
+      fontSize: '17px',
+      fontFamily: 'Arial, sans-serif',
+      lineHeight: 1.6,
+      fontWeight: 600,
+    }),
+  )
+  dependencies.preferences.set('literal-color-scheme', '"dark"')
+  const initial = await api.loadLibraryListeningBook('book-a')
+  const requested = { preset: 'reading', theme: 'reading' }
+  const clicked = await api.updateListeningRecord(
+    'book-a',
+    { appearance: requested },
+    initial.record.fingerprint,
+  )
+  requested.preset = 'compact'
+  same(
+    clicked.appearance,
+    { preset: 'reading', theme: 'reading' },
+    'Saving kept a caller-owned appearance reference',
+  )
+  const id = await api.createQuietLaunch('book-a', clicked)
+  const expected = {
+    fontSize: 24,
+    lineHeight: 2.1,
+    fontFamily: 'Arial, sans-serif',
+    fontWeight: 600,
+    theme: 'dark',
+  }
+  same((await api.loadQuietLaunch('book-a', id)).appearance, expected)
+  clicked.appearance.theme = 'sepia'
+  dependencies.preferences.set(
+    'settings',
+    JSON.stringify({
+      fontSize: '48px',
+      fontFamily: 'New font',
+      lineHeight: 1.2,
+      fontWeight: 100,
+    }),
+  )
+  dependencies.preferences.set('literal-color-scheme', '"light"')
+  metadata.configuration.typography = { fontSize: '40px', lineHeight: 1.3 }
+  await db.books.put(metadata)
+  const next = await api.updateListeningRecord(
+    'book-a',
+    { appearance: { preset: 'compact', theme: 'sepia' } },
+    initial.record.fingerprint,
+  )
+  const launched = await api.loadQuietLaunch('book-a', id)
+  same(launched.appearance, expected)
+  same(launched.record.appearance, { preset: 'reading', theme: 'reading' })
+  launched.appearance.fontSize = 47
+  launched.record.appearance.preset = 'large'
+  same(
+    (await api.loadQuietLaunch('book-a', id)).appearance,
+    expected,
+    'Launch read returned a live stored appearance reference',
+  )
+  same(
+    {
+      ...(await api.loadLibraryListeningBook('book-a')).record,
+      marker: undefined,
+    },
+    next,
+  )
+})
+
+test('malformed global appearance preferences cannot prevent a safe default launch', async () => {
+  const { db, api, dependencies } = harness()
+  await seed(db)
+  dependencies.preferences.set('settings', '{bad json')
+  const initial = await api.loadLibraryListeningBook('book-a')
+  const id = await api.createQuietLaunch('book-a', initial.record)
+  const launched = await api.loadQuietLaunch('book-a', id)
+  same(launched.appearance, {
+    fontSize: 22,
+    lineHeight: 1.75,
+    fontFamily: "Georgia, 'Times New Roman', serif",
+    fontWeight: 400,
+    theme: 'light',
+  })
+})
+
+test('Undo respects newer appearance writes and same-revision appearance changes without altering the launch', async () => {
+  const { db, api } = harness()
+  await seed(db)
+  const initial = await api.loadLibraryListeningBook('book-a')
+  await api.updateListeningRecord(
+    'book-a',
+    { appearance: { preset: 'large', theme: 'dark' } },
+    initial.record.fingerprint,
+  )
+  const change = await api.saveLibraryBookmark(
+    'book-a',
+    marker(),
+    initial.record.fingerprint,
+  )
+  const id = await api.createQuietLaunch('book-a', change.record)
+  const appearanceBefore = (await api.loadQuietLaunch('book-a', id)).appearance
+  const newer = await api.updateListeningRecord(
+    'book-a',
+    { appearance: { preset: 'compact', theme: 'sepia' } },
+    initial.record.fingerprint,
+  )
+  await assert.rejects(
+    api.undoLibraryBookmark('book-a', change.record, change.previous),
+    /bookmark changed/i,
+  )
+  same(await db.listening.get('book-a'), newer)
+  const sameRevision = {
+    ...clone(change.record),
+    appearance: { preset: 'reading', theme: 'reading' },
+  }
+  await db.listening.put(sameRevision)
+  await assert.rejects(
+    api.undoLibraryBookmark('book-a', change.record, change.previous),
+    /bookmark changed/i,
+  )
+  same(await db.listening.get('book-a'), sameRevision)
+  same((await api.loadQuietLaunch('book-a', id)).appearance, appearanceBefore)
+})
+
 async function main() {
   console.log(
-    'Node persistence unit tests: real integrated.ts + WebCrypto; structured-clone memory DB.',
+    'Node persistence unit tests: real integrated.ts + appearance.ts + WebCrypto; structured-clone memory DB.',
   )
   console.log('Not a Dexie migration, IndexedDB, converter, or browser test.')
   let failures = 0
