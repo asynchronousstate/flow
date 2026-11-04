@@ -9,6 +9,7 @@ export type Action =
   | 'timeline'
   | 'theme'
   | 'listening'
+  | 'settings'
 export const actionState = atom<Action | undefined>({
   key: 'action',
   default: undefined,

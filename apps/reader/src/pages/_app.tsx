@@ -4,6 +4,7 @@ import '../listening/integrated.css'
 import '../listening/quiet.css'
 import '../components/reader-v23.css'
 import '../library/library.css'
+import '../listening/toolbar/toolbar.css'
 import 'react-photo-view/dist/react-photo-view.css'
 
 import { LiteralProvider } from '@literal-ui/core'
@@ -17,17 +18,22 @@ import { Layout, Theme } from '../components'
 export default function MyApp({ Component, pageProps }: AppProps) {
   const router = useRouter()
 
-  if (router.pathname === '/success' || router.pathname === '/listen')
-    return <Component {...pageProps} />
+  if (router.pathname === '/success') return <Component {...pageProps} />
 
   return (
     <ErrorBoundary fallback={<Fallback />}>
       <LiteralProvider>
         <RecoilRoot>
           <Theme />
-          <Layout>
+          {['/listen', '/listening-toolbar-options'].includes(
+            router.pathname,
+          ) ? (
             <Component {...pageProps} />
-          </Layout>
+          ) : (
+            <Layout>
+              <Component {...pageProps} />
+            </Layout>
+          )}
         </RecoilRoot>
       </LiteralProvider>
     </ErrorBoundary>

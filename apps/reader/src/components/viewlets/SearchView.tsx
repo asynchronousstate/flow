@@ -31,8 +31,8 @@ const searchScrollOffsets = new Map<string, number>()
 // while this will not happen when using `React.useState`,
 // so we should create an intermediate `keyword` state to fix this.
 function useIntermediateKeyword() {
-  const [keyword, setKeyword] = useState('')
   const { focusedBookTab } = useReaderSnapshot()
+  const [keyword, setKeyword] = useState(focusedBookTab?.keyword ?? '')
 
   useEffect(() => {
     setKeyword(focusedBookTab?.keyword ?? '')
@@ -189,7 +189,7 @@ const ResultRow: React.FC<ResultRowProps> = ({ result, keyword }) => {
           if (tab) {
             tab.activeResultID = id
             tab.display(cfi)
-            if (mobile) setAction(undefined)
+            if (mobile && !tab.runtimePolicy) setAction(undefined)
           }
         },
       })}

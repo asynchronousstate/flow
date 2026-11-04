@@ -52,19 +52,30 @@ Copy and rename all `.env.local.example`s to `.env.local` and setup the environm
 pnpm dev
 ```
 
-## Flow Listening 2.3
+## Flow Listening 2.4
 
-Latest release: [Flow Listening 2.3.1](https://github.com/asynchronousstate/flow/releases/tag/v2.3.1).
-See [what changed](docs/flow-listening-v2.3-release.md) and [verification and limits](docs/flow-listening-v2.3-testing.md).
+Version: **2.4.0**. See the [2.4 changes, validation and limits](docs/flow-listening-v2.4-release.md)
+and the [GitHub release](https://github.com/asynchronousstate/flow/releases/tag/v2.4.0)
+for the source tag and publication receipt. The promoted reader production build
+and all 166 regression groups pass.
 
-Patch 2.3.1 adds immediate Bookmark switching with a refreshed preview / Undo
-toast and removes the persistent bottom status strip. See the
-[patch notes and validation](docs/flow-listening-v2.3.1-release.md).
+Version 2.4 promotes **Classic Ribbon** into every integrated Listening Mode
+session. The fixed bottom toolbar includes Home, Contents, Search, Annotations,
+Images, Timeline, Typography, Theme and Settings. These open the original Flow
+features in a real ebook preview. On Android, Home and Settings stay pinned
+while the middle tools scroll horizontally. Home preserves the reading position,
+saved Bookmark and chapter range before returning to the library.
 
-Version 2.3 adds safe cache cleanup and complete library backups, Android panel
-Back / Forward, recoverable preparation, reachable listening controls, clearer
-reader tools and library resumes, and saved listening appearance presets. The
-chapter-based range and read-only saved Bookmark workflow remain intact.
+The chapter-based From / Through range and read-only saved Bookmark preview
+remain intact. A valid saved Bookmark defaults to the start on a fresh listening
+setup; Chapter beginning is still available. The saved Bookmark remains visible
+even when Chapter beginning was selected for the current session.
+
+Version 2.4 retains the safe local-data controls, Android panel navigation,
+recoverable preparation, library resumes and listening appearance from 2.3,
+plus immediate Bookmark switching, preview / Undo feedback and no persistent
+bottom status strip from 2.3.1. The [earlier patch notes](docs/flow-listening-v2.3.1-release.md)
+and [2.3 verification record](docs/flow-listening-v2.3-testing.md) remain available.
 
 Flow Listening v2 keeps the original Flow library, reader, annotations, search,
 typography and reading progress, and adds listening to the ebook workflow.
@@ -77,9 +88,10 @@ typography and reading progress, and adds listening to the ebook workflow.
    reading or in the listening document, not in the range panel.
 3. Choose **Open listening view**, close its tools, and start **Read aloud** from
    Microsoft Edge's menu. On desktop, **Ctrl+Shift+U** starts Read aloud.
-4. Pause Edge before saving another paragraph through **Session / Tools**. The
-   current document stays unchanged; the saved paragraph applies to a new
-   session. **Return to book** restores the original ebook workflow.
+4. Pause Edge before saving another paragraph with its **Bookmark** icon or
+   **Session / Tools**. The current document stays unchanged; the saved paragraph
+   applies to a new session. Use the bottom toolbar for the original reader
+   features, **Return to book** for listening setup, or **Home** for the library.
 
 The prepared text retains chapter context and all selected chapters in one
 stable document. It does not turn ebook pages during narration. Edge controls
@@ -95,7 +107,7 @@ The document regression fixture is generated with
 
 ### Android PWA
 
-Open [Flow Listening 2.3](https://flow-listening-v2.vercel.app) in Microsoft Edge on
+Open [Flow Listening](https://flow-listening-v2.vercel.app) in Microsoft Edge on
 your phone, then use Edge's **Add to Home screen** or install option. Import your EPUB
 on that phone and follow the same cover → Listen → Open listening view flow.
 If the installed view hides Read aloud, open the same quiet-document URL in

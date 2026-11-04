@@ -133,7 +133,7 @@ export default function Index() {
           throw new Error('This book is no longer in your Flow library.')
         // Only restore a locator verified against the current EPUB bytes.
         // A changed book keeps its canonical reading position and opens recovery.
-        const returnCfi = listening?.record.returnCfi
+        const returnCfi = book.cfi ?? listening?.record.returnCfi
         const tab = reader.addTab({
           ...book,
           cfi: returnCfi ?? book.cfi,

@@ -36,7 +36,9 @@
   box-shadow: none;
 }
 
-.flow-quiet button {
+.flow-quiet
+  button:where(:not(.flow-quiet-bookmark):not(.flow-toolkit-workspace
+      button):not(.flow-listening-toolbar button)) {
   min-height: 42px;
   padding: 9px 13px;
   border: 1px solid #d3dce3;
@@ -45,11 +47,15 @@
   cursor: pointer;
 }
 
-.flow-quiet button:hover {
+.flow-quiet
+  button:where(:not(.flow-quiet-bookmark):not(.flow-toolkit-workspace
+      button):not(.flow-listening-toolbar button)):hover {
   background: #edf5f9;
 }
 
-.flow-quiet button:disabled {
+.flow-quiet
+  button:where(:not(.flow-quiet-bookmark):not(.flow-toolkit-workspace
+      button):not(.flow-listening-toolbar button)):disabled {
   cursor: default;
   opacity: 0.55;
 }
@@ -391,7 +397,9 @@
 }
 .flow-quiet[data-quiet-theme] .flow-quiet-choice,
 .flow-quiet[data-quiet-theme] .flow-quiet-paragraph-list select,
-.flow-quiet[data-quiet-theme] button:not(.flow-quiet-bookmark) {
+.flow-quiet[data-quiet-theme]
+  button:not(.flow-quiet-bookmark):not(.flow-toolkit-workspace
+    button):not(.flow-listening-toolbar button) {
   background: var(--quiet-panel, #f8fafb);
   border-color: var(--quiet-outline, #d3dce3);
   color: inherit;

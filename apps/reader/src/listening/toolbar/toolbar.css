@@ -1,0 +1,400 @@
+.flow-listening-toolkit {
+  --flow-toolkit-bar-height: 76px;
+  --flow-toolkit-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --flow-toolkit-bottom: calc(
+    var(--flow-toolkit-bar-height) + var(--flow-toolkit-safe-bottom)
+  );
+  --flow-toolkit-surface: var(--quiet-panel, #f8fafb);
+  --flow-toolkit-border: var(--quiet-outline, #d3dce3);
+  --flow-toolkit-text: var(--quiet-foreground, #29323c);
+  --flow-toolkit-accent: #00799b;
+  padding-bottom: var(--flow-toolkit-bottom);
+  scroll-padding-bottom: calc(var(--flow-toolkit-bottom) + 24px);
+}
+
+.flow-listening-toolkit *,
+.flow-listening-toolkit *::before,
+.flow-listening-toolkit *::after {
+  box-sizing: border-box;
+}
+
+.flow-listening-toolkit[data-quiet-theme='dark'] {
+  --flow-toolkit-accent: #8ccde7;
+}
+
+.flow-listening-toolkit .flow-quiet-article {
+  padding-bottom: calc(var(--flow-toolkit-bottom) + 180px);
+}
+
+.flow-listening-toolkit .flow-quiet-save-toast {
+  z-index: 65;
+  bottom: calc(var(--flow-toolkit-bottom) + 12px);
+}
+
+.flow-listening-toolkit .flow-toolkit-navigation-error {
+  position: fixed;
+  z-index: 80;
+  bottom: calc(var(--flow-toolkit-bottom) + 12px);
+  left: 50%;
+  width: min(520px, calc(100% - 24px));
+  max-height: 40vh;
+  margin: 0;
+  padding: 12px 16px;
+  overflow-y: auto;
+  transform: translateX(-50%);
+  border: 2px solid #b94848;
+  border-radius: 10px;
+  background: var(--flow-toolkit-surface);
+  color: var(--flow-toolkit-text);
+  box-shadow: 0 6px 24px #0003;
+}
+
+.flow-listening-toolbar {
+  position: fixed;
+  z-index: 70;
+  inset: auto 0 0;
+  min-width: 0;
+  width: 100%;
+  height: var(--flow-toolkit-bottom);
+  padding: 0 max(12px, env(safe-area-inset-right, 0px))
+    var(--flow-toolkit-safe-bottom) max(12px, env(safe-area-inset-left, 0px));
+  border-top: 1px solid var(--flow-toolkit-border);
+  background: var(--flow-toolkit-surface);
+  color: var(--flow-toolkit-text);
+  box-shadow: 0 -3px 18px #0000000a;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 12px;
+  line-height: 1.2;
+  isolation: isolate;
+}
+
+.flow-toolkit-toolbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  max-width: 1020px;
+  height: 100%;
+  margin: 0 auto;
+}
+
+.flow-toolkit-toolbar-scroll {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: 8px;
+  scrollbar-width: thin;
+  touch-action: pan-x pan-y;
+}
+
+.flow-quiet.flow-listening-toolkit
+  .flow-listening-toolbar
+  .flow-toolkit-action {
+  display: inline-flex;
+  flex: 0 0 78px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 5px;
+  width: 78px;
+  min-width: 48px;
+  min-height: 56px;
+  height: 60px;
+  margin: 0;
+  padding: 6px 4px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--flow-toolkit-text);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.flow-toolkit-action svg {
+  flex: 0 0 auto;
+}
+
+.flow-toolkit-action > span {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.flow-quiet.flow-listening-toolkit
+  .flow-listening-toolbar
+  .flow-toolkit-action:hover {
+  background: color-mix(in srgb, var(--flow-toolkit-accent) 8%, transparent);
+}
+
+.flow-quiet.flow-listening-toolkit
+  .flow-listening-toolbar
+  .flow-toolkit-action[aria-pressed='true'] {
+  border-color: var(--flow-toolkit-accent);
+  background: color-mix(in srgb, var(--flow-toolkit-accent) 13%, transparent);
+  color: var(--flow-toolkit-accent);
+}
+
+.flow-quiet.flow-listening-toolkit
+  .flow-listening-toolbar
+  .flow-toolkit-action:focus-visible,
+.flow-listening-toolkit .flow-toolkit-workspace :focus-visible {
+  outline: 2px solid var(--flow-toolkit-accent);
+  outline-offset: -3px;
+}
+
+.flow-quiet.flow-listening-toolkit
+  .flow-listening-toolbar
+  .flow-toolkit-action:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+/* Original reader panes remain separate from the immutable quiet article. */
+.flow-toolkit-workspace {
+  --flow-toolkit-surface: rgb(var(--md-sys-color-surface));
+  --flow-toolkit-text: rgb(var(--md-sys-color-on-surface));
+  --flow-toolkit-border: rgb(var(--md-sys-color-outline-variant));
+  color-scheme: light;
+  position: fixed;
+  z-index: 60;
+  inset: 68px 16px calc(var(--flow-toolkit-bottom) + 12px);
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+
+:root.dark .flow-toolkit-workspace {
+  color-scheme: dark;
+}
+
+.flow-toolkit-panel,
+.flow-toolkit-source {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--flow-toolkit-border);
+  border-radius: 14px;
+  background: var(--flow-toolkit-surface);
+  color: var(--flow-toolkit-text);
+  box-shadow: 0 12px 36px #00000029;
+  pointer-events: auto;
+}
+
+.flow-toolkit-panel[hidden],
+.flow-toolkit-source[hidden],
+.flow-toolkit-workspace[hidden] {
+  display: none;
+}
+
+/* Responsive layout rules must never reopen a closed workspace. */
+.flow-listening-toolkit[data-variant] .flow-toolkit-workspace[hidden] {
+  display: none;
+}
+
+.flow-toolkit-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--flow-toolkit-border);
+  background: var(--flow-toolkit-surface);
+}
+
+.flow-toolkit-heading :is(h1, h2, h3, p) {
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.flow-quiet.flow-listening-toolkit .flow-toolkit-heading button {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.flow-toolkit-panel-body,
+.flow-toolkit-source-body {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.flow-toolkit-feature-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+.flow-toolkit-feature-view[hidden] {
+  display: none;
+}
+.flow-toolkit-feature-view > .scroll-parent {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.flow-toolkit-panel > .scroll-parent,
+.flow-toolkit-panel-body > .scroll-parent {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.flow-toolkit-panel :is(input, select, textarea) {
+  max-width: 100%;
+}
+
+.flow-toolkit-panel .Page {
+  min-height: 0;
+  height: auto;
+  overflow-y: auto;
+}
+
+.flow-toolkit-source {
+  flex: 1 1 0;
+}
+
+.flow-toolkit-source .ReaderGridView {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 0;
+}
+
+.flow-toolkit-source .ReaderGroup {
+  min-width: 0;
+}
+
+/* Ribbon: a familiar full-width bar, with a side drawer for reader tools. */
+.flow-listening-toolkit[data-variant='ribbon'] .flow-toolkit-panel {
+  flex: 0 0 350px;
+  width: min(350px, 100%);
+  margin-right: auto;
+}
+
+@media (max-width: 900px) {
+  .flow-toolkit-toolbar-scroll {
+    justify-content: flex-start;
+  }
+
+  .flow-quiet.flow-listening-toolkit
+    .flow-listening-toolbar
+    .flow-toolkit-action {
+    flex-basis: 68px;
+    width: 68px;
+  }
+}
+
+@media (max-width: 640px) {
+  .flow-listening-toolkit {
+    --flow-toolkit-bar-height: 72px;
+  }
+
+  .flow-listening-toolbar {
+    padding-inline: max(5px, env(safe-area-inset-right, 0px))
+      max(5px, env(safe-area-inset-left, 0px));
+  }
+
+  .flow-toolkit-toolbar-inner {
+    justify-content: space-between;
+    gap: 3px;
+  }
+
+  .flow-toolkit-toolbar-scroll {
+    flex: 1 1 0;
+    gap: 2px;
+    scrollbar-width: thin;
+  }
+
+  .flow-quiet.flow-listening-toolkit
+    .flow-listening-toolbar
+    .flow-toolkit-action {
+    flex-basis: 64px;
+    width: 64px;
+    height: 58px;
+    padding: 5px 2px;
+    border-radius: 8px;
+  }
+
+  .flow-toolkit-action > span {
+    font-size: 10px;
+  }
+
+  .flow-toolkit-workspace {
+    inset: max(8px, env(safe-area-inset-top, 0px))
+      max(6px, env(safe-area-inset-right, 0px))
+      calc(var(--flow-toolkit-bottom) + 6px)
+      max(6px, env(safe-area-inset-left, 0px));
+    gap: 6px;
+  }
+
+  .flow-toolkit-heading {
+    min-height: 52px;
+    padding: 5px 10px;
+  }
+
+  .flow-toolkit-panel :is(input, select, textarea) {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .flow-toolkit-panel button {
+    min-height: 44px;
+  }
+
+  .flow-toolkit-panel .Pane .group-hover\:visible {
+    visibility: visible;
+  }
+
+  .flow-listening-toolkit[data-variant='ribbon'] .flow-toolkit-workspace {
+    display: block;
+  }
+
+  .flow-listening-toolkit[data-variant='ribbon'] .flow-toolkit-panel,
+  .flow-listening-toolkit[data-variant='ribbon'] .flow-toolkit-source {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
+  }
+
+  .flow-listening-toolkit[data-variant='ribbon'] .flow-toolkit-panel {
+    z-index: 1;
+  }
+}
