@@ -54,8 +54,12 @@ pnpm dev
 
 ## Flow Listening 2.3
 
-Latest release: [Flow Listening 2.3.0](https://github.com/asynchronousstate/flow/releases/tag/v2.3.0).
+Latest release: [Flow Listening 2.3.1](https://github.com/asynchronousstate/flow/releases/tag/v2.3.1).
 See [what changed](docs/flow-listening-v2.3-release.md) and [verification and limits](docs/flow-listening-v2.3-testing.md).
+
+Patch 2.3.1 adds immediate Bookmark switching with a refreshed preview / Undo
+toast and removes the persistent bottom status strip. See the
+[patch notes and validation](docs/flow-listening-v2.3.1-release.md).
 
 Version 2.3 adds safe cache cleanup and complete library backups, Android panel
 Back / Forward, recoverable preparation, reachable listening controls, clearer

@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { FiArrowLeft } from 'react-icons/fi'
+import { FiArrowLeft, FiBookmark, FiX } from 'react-icons/fi'
 
 import { db } from '../db'
 import {
@@ -26,7 +26,9 @@ import QuietBookmarks, {
 } from './QuietBookmarks'
 import { resolveListeningAppearance, savedReaderAppearance } from './appearance'
 import type { ListeningAppearance } from './appearance'
-import { chapterForBookmark, resolveListeningChapter } from './chapters'
+import { createBookmarkQueue } from './bookmark-queue'
+import type { BookmarkQueue, BookmarkQueueSnapshot } from './bookmark-queue'
+import { chapterForBookmark } from './chapters'
 import {
   buildQuietSession,
   getBookmarkParagraphs,
@@ -34,7 +36,6 @@ import {
 } from './document'
 import type { ListeningPreparationProgress } from './epub'
 import {
-  LibraryBookmarkChange,
   loadLibraryListeningBook,
   loadQuietLaunch,
   saveLibraryBookmark,
@@ -106,16 +107,30 @@ export default function QuietListeningDocument({
   const [session, setSession] = useState<QuietSession>()
   const [loadError, setLoadError] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
-  const [saved, setSaved] = useState<BookmarkParagraph>()
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
-  const [notice, setNotice] = useState('')
-  const [undo, setUndo] = useState<LibraryBookmarkChange>()
+  const [bookmark, setBookmark] = useState<
+    BookmarkQueueSnapshot<BookmarkParagraph>
+  >({
+    pending: false,
+    canUndo: false,
+    operation: 0,
+    action: null,
+    status: 'idle',
+  })
+  const saved = bookmark.selection
+  const saving = bookmark.pending
+  const undo = bookmark.canUndo
+  const saveError =
+    bookmark.status !== 'error'
+      ? ''
+      : bookmark.error instanceof Error
+      ? bookmark.error.message
+      : 'The Bookmark could not be saved. Please try again.'
   const [listSection, setListSection] = useState('')
   const [appearance, setAppearance] = useState<ListeningAppearance>()
   const [progress, setProgress] = useState<ListeningPreparationProgress>()
   const [retry, setRetry] = useState(0)
   const [toast, setToast] = useState(false)
+  const [toastPaused, setToastPaused] = useState(false)
   const [bookmarkListOpen, setBookmarkListOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const panel = useRef<ReturnType<typeof createMobilePanelHistory>>()
@@ -137,11 +152,9 @@ export default function QuietListeningDocument({
   }, [bookId])
   const articleHost = useRef<HTMLDivElement>(null)
   const toolsSummary = useRef<HTMLElement>(null)
-  const saveInFlight = useRef(false)
-  const fingerprint = useRef<string>()
-  const loadedBook = useRef<LoadedListeningBook['book']>()
-  const launchEnd = useRef<{ reference: string; title: string }>()
-  const mounted = useRef(true)
+  const bookmarkQueue = useRef<BookmarkQueue<BookmarkParagraph>>()
+  const feedbackOperation = useRef(0)
+  const returnRequested = useRef(false)
   const returnHref = `/?book=${encodeURIComponent(bookId)}&listening=1${
     sessionId ? `&session=${encodeURIComponent(sessionId)}` : ''
   }`
@@ -180,9 +193,18 @@ export default function QuietListeningDocument({
   }, [toolsOpen, bookmarkListOpen, helpOpen])
 
   useEffect(() => {
+    if (!toast || saving || saveError || toastPaused) return
+    const timer = window.setTimeout(() => setToast(false), 8000)
+    return () => window.clearTimeout(timer)
+  }, [bookmark.operation, saveError, saving, toast, toastPaused])
+
+  useEffect(() => {
     let active = true
+    let queue: BookmarkQueue<BookmarkParagraph> | undefined
     const controller = new AbortController()
-    mounted.current = true
+    setToast(false)
+    setToastPaused(false)
+    feedbackOperation.current = 0
     setLoadError('')
     setProgress(undefined)
     async function load() {
@@ -212,22 +234,56 @@ export default function QuietListeningDocument({
             reading.dark,
           ),
       )
-      loadedBook.current = launch.book
-      fingerprint.current = launch.record.fingerprint
-      launchEnd.current = {
-        reference: launch.record.through,
-        title: resolveListeningChapter(
-          launch.book,
-          launch.record.through,
-          'through',
-        ).title,
-      }
-      setSaved(
+      const initialSelection =
         latest?.fingerprint === launch.record.fingerprint &&
-          latest.startAt === 'marker'
+        latest.startAt === 'marker'
           ? bookmarkedParagraph(launch.book, latest.marker)
-          : undefined,
-      )
+          : undefined
+      queue = createBookmarkQueue({
+        initialSelection,
+        sameSelection: sameBookmark,
+        save: async (paragraph: BookmarkParagraph) => {
+          const marker: ListeningMarker = {
+            sourceHref: paragraph.sourceHref,
+            blockId: paragraph.blockId,
+            text: paragraph.text,
+            savedAt: Date.now(),
+          }
+          const chapter = chapterForBookmark(launch.book, marker)
+          marker.chapterTitle = chapter.title
+          return saveLibraryBookmark(
+            bookId,
+            marker,
+            launch.record.fingerprint,
+            {
+              from: chapter.id,
+              through: launch.record.through,
+            },
+          )
+        },
+        restore: (change) =>
+          undoLibraryBookmark(bookId, change.record, change.previous),
+        selectionFromRecord: (record) =>
+          record.fingerprint === launch.record.fingerprint &&
+          record.startAt === 'marker'
+            ? bookmarkedParagraph(launch.book, record.marker)
+            : undefined,
+        recover: async () => (await loadLibraryListeningBook(bookId)).record,
+        onChange: (next) => {
+          if (!active) return
+          setBookmark(next)
+          if (
+            next.operation !== feedbackOperation.current ||
+            next.status === 'error'
+          ) {
+            feedbackOperation.current = next.operation
+            setToastPaused(false)
+            setToast(true)
+          }
+        },
+      })
+      bookmarkQueue.current = queue
+      setBookmark(queue.getSnapshot())
       setSession(prepared)
       setListSection(prepared.sections[0]?.id || '')
     }
@@ -242,7 +298,8 @@ export default function QuietListeningDocument({
     return () => {
       active = false
       controller.abort()
-      mounted.current = false
+      queue?.dispose()
+      if (bookmarkQueue.current === queue) bookmarkQueue.current = undefined
     }
   }, [bookId, retry, sessionId])
 
@@ -271,98 +328,12 @@ export default function QuietListeningDocument({
     [session],
   )
 
-  async function saveParagraph(paragraph: BookmarkParagraph) {
-    const book = loadedBook.current
-    const end = launchEnd.current
-    if (saveInFlight.current || !book || !end || sameBookmark(saved, paragraph))
-      return
-    saveInFlight.current = true
-    setSaving(true)
-    setSaveError('')
-    setNotice('')
-    try {
-      const marker: ListeningMarker = {
-        sourceHref: paragraph.sourceHref,
-        blockId: paragraph.blockId,
-        text: paragraph.text,
-        savedAt: Date.now(),
-      }
-      const chapter = chapterForBookmark(book, marker)
-      marker.chapterTitle = chapter.title
-      const change = await saveLibraryBookmark(
-        bookId,
-        marker,
-        fingerprint.current,
-        { from: chapter.id, through: end.reference },
-      )
-      if (!mounted.current) return
-      setSaved({ ...paragraph, chapterTitle: chapter.title })
-      setUndo(change)
-      setToast(true)
-      setNotice(
-        `Bookmark saved. Your next session starts in ${chapter.title} and continues through ${end.title}.`,
-      )
-    } catch (error) {
-      if (mounted.current) {
-        setToast(true)
-        setSaveError(
-          error instanceof Error
-            ? error.message
-            : 'The bookmark could not be saved. Please try again.',
-        )
-      }
-    } finally {
-      saveInFlight.current = false
-      if (mounted.current) setSaving(false)
-    }
+  function saveParagraph(paragraph: BookmarkParagraph) {
+    bookmarkQueue.current?.select(paragraph)
   }
 
-  async function undoBookmark() {
-    if (saveInFlight.current || !undo || !loadedBook.current) return
-    saveInFlight.current = true
-    setSaving(true)
-    setSaveError('')
-    try {
-      const restored = await undoLibraryBookmark(
-        bookId,
-        undo.record,
-        undo.previous,
-      )
-      if (!mounted.current) return
-      setSaved(
-        restored.startAt === 'marker'
-          ? bookmarkedParagraph(loadedBook.current, restored.marker)
-          : undefined,
-      )
-      setUndo(undefined)
-      setToast(true)
-      setNotice(
-        'Bookmark undone. Your previous listening start and range are restored.',
-      )
-    } catch (error) {
-      if (mounted.current) {
-        setToast(true)
-        setUndo(undefined)
-        setSaveError(
-          error instanceof Error
-            ? error.message
-            : 'The bookmark could not be undone.',
-        )
-        // A newer change in another tab wins. Reflect its current selection.
-        const latest = await loadLibraryListeningBook(bookId).catch(
-          () => undefined,
-        )
-        if (mounted.current && latest)
-          setSaved(
-            latest.record.startAt === 'marker'
-              ? bookmarkedParagraph(latest.book, latest.record.marker)
-              : undefined,
-          )
-      }
-    } finally {
-      saveInFlight.current = false
-      if (mounted.current) setSaving(false)
-    }
+  function undoBookmark() {
+    bookmarkQueue.current?.undo()
   }
 
   return (
@@ -386,7 +357,29 @@ export default function QuietListeningDocument({
         </title>
       </Head>
       <header className="flow-quiet-toolbar">
-        <a className="flow-quiet-return" href={returnHref}>
+        <a
+          className="flow-quiet-return"
+          href={returnHref}
+          onClick={async (event) => {
+            if (
+              event.button !== 0 ||
+              event.metaKey ||
+              event.ctrlKey ||
+              event.shiftKey ||
+              event.altKey
+            )
+              return
+            const queue = bookmarkQueue.current
+            if (!queue?.getSnapshot().pending && !returnRequested.current)
+              return
+            event.preventDefault()
+            if (!queue || returnRequested.current) return
+            returnRequested.current = true
+            await queue.settled()
+            returnRequested.current = false
+            if (bookmarkQueue.current === queue) void router.push(returnHref)
+          }}
+        >
           <FiArrowLeft aria-hidden="true" size={16} /> Return to book
         </a>
         {session && (
@@ -413,11 +406,7 @@ export default function QuietListeningDocument({
                         track Edge’s spoken position.
                       </p>
                       {undo && (
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={undoBookmark}
-                        >
+                        <button type="button" onClick={undoBookmark}>
                           Undo bookmark
                         </button>
                       )}
@@ -461,7 +450,6 @@ export default function QuietListeningDocument({
                             <p>{paragraph.text}</p>
                             <button
                               type="button"
-                              disabled={saving}
                               aria-pressed={sameBookmark(saved, paragraph)}
                               onClick={() => saveParagraph(paragraph)}
                             >
@@ -537,30 +525,9 @@ export default function QuietListeningDocument({
               host={articleHost}
               paragraphs={paragraphs}
               saved={saved}
-              saving={saving}
               onBookmark={saveParagraph}
             />
           </div>
-          <footer className="flow-quiet-bookmark-status">
-            <p>
-              {saving
-                ? 'Saving bookmark…'
-                : notice ||
-                  (saved
-                    ? `Bookmark: ${saved.chapterTitle}`
-                    : 'Bookmark a paragraph to set your next listening start.')}
-            </p>
-            {undo && (
-              <button type="button" disabled={saving} onClick={undoBookmark}>
-                Undo bookmark
-              </button>
-            )}
-            {saveError && (
-              <p className="flow-quiet-error" role="alert">
-                {saveError}
-              </p>
-            )}
-          </footer>
         </>
       ) : (
         <section className="flow-quiet-loading">
@@ -576,22 +543,60 @@ export default function QuietListeningDocument({
           className="flow-quiet-save-toast"
           aria-label="Bookmark feedback"
           data-nosnippet
+          onMouseEnter={() => setToastPaused(true)}
+          onMouseLeave={() => setToastPaused(false)}
+          onFocusCapture={() => setToastPaused(true)}
+          onBlurCapture={(event) => {
+            if (
+              !event.currentTarget.contains(event.relatedTarget as Node | null)
+            )
+              setToastPaused(false)
+          }}
         >
-          <p role={saveError ? 'alert' : 'status'}>
-            {saveError || (undo ? 'Bookmark saved for next time.' : notice)}
-          </p>
-          {undo && (
-            <button type="button" disabled={saving} onClick={undoBookmark}>
-              Undo
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setToast(false)}
-            aria-label="Dismiss Bookmark feedback"
+          <div
+            key={bookmark.operation}
+            className="flow-quiet-save-feedback"
+            role={saveError ? 'alert' : 'status'}
+            aria-atomic="true"
           >
-            Dismiss
-          </button>
+            <p className="flow-quiet-save-heading">
+              <FiBookmark aria-hidden="true" />
+              <strong>
+                {saveError
+                  ? 'Bookmark needs attention'
+                  : bookmark.action === 'undo'
+                  ? 'Previous Bookmark restored'
+                  : 'Bookmark moved'}
+              </strong>
+            </p>
+            {saved && <blockquote>{saved.text}</blockquote>}
+            <p
+              className={
+                saveError ? 'flow-quiet-error' : 'flow-quiet-save-state'
+              }
+            >
+              {saveError ||
+                (saving ? 'Saving…' : 'Saved for your next session')}
+            </p>
+          </div>
+          <div className="flow-quiet-save-actions">
+            {undo && (
+              <button type="button" onClick={undoBookmark}>
+                Undo
+              </button>
+            )}
+            <button
+              type="button"
+              className="flow-quiet-toast-dismiss"
+              onClick={() => {
+                setToast(false)
+                setToastPaused(false)
+              }}
+              aria-label="Dismiss Bookmark feedback"
+            >
+              <FiX aria-hidden="true" />
+            </button>
+          </div>
         </aside>
       )}
     </main>

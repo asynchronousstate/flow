@@ -36,13 +36,11 @@ export default function QuietBookmarks({
   host,
   paragraphs,
   saved,
-  saving,
   onBookmark,
 }: {
   host: RefObject<HTMLDivElement>
   paragraphs: BookmarkParagraph[]
   saved?: BookmarkParagraph
-  saving: boolean
   onBookmark: (paragraph: BookmarkParagraph) => void
 }) {
   const [positions, setPositions] = useState<PositionedBookmark[]>([])
@@ -134,9 +132,8 @@ export default function QuietBookmarks({
               paragraph.chapterTitle
             }: ${paragraph.text.slice(0, 160)}`}
             aria-pressed={selected}
-            disabled={saving}
             style={{ left, top, fontSize: size }}
-            onClick={() => !selected && onBookmark(paragraph)}
+            onClick={() => onBookmark(paragraph)}
           >
             <FiBookmark aria-hidden="true" focusable="false" />
           </button>
