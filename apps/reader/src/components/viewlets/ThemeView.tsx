@@ -39,6 +39,9 @@ export const ThemeView: React.FC<PaneViewProps> = (props) => {
               .map((i) => (
                 <Background
                   key={i}
+                  aria-label={
+                    i < 0 ? 'White background' : `Light background ${i}`
+                  }
                   className={i > 0 ? `bg-surface${i}` : 'bg-white'}
                   onClick={() => {
                     setScheme('light')
@@ -48,6 +51,7 @@ export const ThemeView: React.FC<PaneViewProps> = (props) => {
               ))}
             <Background
               className="bg-black"
+              aria-label="Dark background"
               onClick={() => {
                 setScheme('dark')
               }}
@@ -59,12 +63,16 @@ export const ThemeView: React.FC<PaneViewProps> = (props) => {
   )
 }
 
-interface BackgroundProps extends ComponentProps<'div'> {}
+interface BackgroundProps extends ComponentProps<'button'> {}
 const Background: React.FC<BackgroundProps> = ({ className, ...props }) => {
   return (
-    <div
-      className={clsx('border-outline-variant light h-6 w-6 border', className)}
+    <button
+      type="button"
+      className={clsx(
+        'border-outline-variant light h-11 w-11 shrink-0 border',
+        className,
+      )}
       {...props}
-    ></div>
+    />
   )
 }

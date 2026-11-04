@@ -21,11 +21,13 @@ import {
 import { Row } from '../Row'
 import { PaneViewProps, PaneView, Pane } from '../base'
 
-export const TocView: React.FC<PaneViewProps> = (props) => {
+export const TocView: React.FC<
+  PaneViewProps & { includeLibrary?: boolean }
+> = ({ includeLibrary = true, ...props }) => {
   const mobile = useMobile()
   return (
     <PaneView {...props}>
-      {mobile || <LibraryPane />}
+      {!mobile && includeLibrary && <LibraryPane />}
       <TocPane />
     </PaneView>
   )
@@ -132,7 +134,7 @@ const TocRow: React.FC<TocRowProps> = ({
         } else {
           tab?.display(section.href, false)
         }
-        if (mobile) setAction(undefined)
+        if (mobile && !tab?.runtimePolicy) setAction(undefined)
       }}
       // `tab` can not be proxy here
       toggle={() => tab?.toggle(id)}

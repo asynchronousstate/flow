@@ -46,8 +46,9 @@ import { TextSelectionMenu } from './TextSelectionMenu'
 import { DropZone, SplitView, useDndContext, useSplitViewItem } from './base'
 import * as pages from './pages'
 
-function handleKeyDown(tab?: BookTab) {
+function handleKeyDown(tab?: BookTab, active = true) {
   return (e: KeyboardEvent) => {
+    if (!active || (tab && !tab.canInteract)) return
     const target = e.target as HTMLElement | null
     if (
       e.defaultPrevented ||
@@ -75,10 +76,10 @@ function handleKeyDown(tab?: BookTab) {
   }
 }
 
-export function ReaderGridView() {
+export function ReaderGridView({ active = true }: { active?: boolean }) {
   const { groups } = useReaderSnapshot()
 
-  useEventListener('keydown', handleKeyDown(reader.focusedBookTab))
+  useEventListener('keydown', handleKeyDown(reader.focusedBookTab, active))
 
   if (!groups.length) return null
   return (
@@ -97,6 +98,9 @@ function ReaderGroup({ index }: ReaderGroupProps) {
   const group = reader.groups[index]!
   const { focusedIndex } = useReaderSnapshot()
   const { tabs, selectedIndex } = useSnapshot(group)
+  const companion =
+    group.bookTabs.length > 0 &&
+    group.bookTabs.every((tab) => !!tab.runtimePolicy)
   const t = useTranslation()
   const [dropError, setDropError] = useState('')
 
@@ -115,31 +119,33 @@ function ReaderGroup({ index }: ReaderGroupProps) {
       onMouseDown={handleMouseDown}
       style={{ width: size }}
     >
-      <Tab.List
-        className="hidden sm:flex"
-        onDelete={() => reader.removeGroup(index)}
-      >
-        {tabs.map((tab, i) => {
-          const selected = i === selectedIndex
-          const focused = index === focusedIndex && selected
-          return (
-            <Tab
-              key={tab.id}
-              selected={selected}
-              focused={focused}
-              onClick={() => group.selectTab(i)}
-              onDelete={() => reader.removeTab(i, index)}
-              Icon={tab instanceof BookTab ? RiBookLine : MdWebAsset}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('text/plain', `${index},${i}`)
-              }}
-            >
-              {tab.isBook ? tab.title : t(`${tab.title}.title`)}
-            </Tab>
-          )
-        })}
-      </Tab.List>
+      {!companion && (
+        <Tab.List
+          className="hidden sm:flex"
+          onDelete={() => reader.removeGroup(index)}
+        >
+          {tabs.map((tab, i) => {
+            const selected = i === selectedIndex
+            const focused = index === focusedIndex && selected
+            return (
+              <Tab
+                key={tab.id}
+                selected={selected}
+                focused={focused}
+                onClick={() => group.selectTab(i)}
+                onDelete={() => reader.removeTab(i, index)}
+                Icon={tab instanceof BookTab ? RiBookLine : MdWebAsset}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', `${index},${i}`)
+                }}
+              >
+                {tab.isBook ? tab.title : t(`${tab.title}.title`)}
+              </Tab>
+            )
+          })}
+        </Tab.List>
+      )}
 
       {dropError && (
         <div className="flow-reader-drop-error shrink-0" role="alert">
@@ -305,6 +311,17 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
   }, [rendition, dark])
 
   const [src, setSrc] = useState<string>()
+  const dismissImage = useCallback(() => setSrc(undefined), [])
+
+  useEffect(() => {
+    if (!src || !tab.runtimePolicy) return
+    if (!tab.canInteract) {
+      dismissImage()
+      return
+    }
+    tab.setSourceOverlay('image', dismissImage)
+    return () => tab.clearSourceOverlay(dismissImage)
+  }, [dismissImage, src, tab])
 
   useEffect(() => {
     if (src) {
@@ -323,7 +340,12 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
 
   useEventListener(iframe, 'mousedown', onMouseDown)
 
+  // Native EPUB links navigate through rendition rather than BookTab.display.
+  // A visible source gesture authorizes progress; hidden iframe events do not.
+  useEventListener(iframe, 'pointerdown', () => tab.noteReaderNavigation())
+
   useEventListener(iframe, 'click', (e) => {
+    if (!tab.canInteract) return
     if (isReaderViewportZoomed(iframe)) return
     // https://developer.chrome.com/blog/tap-to-search
     e.preventDefault()
@@ -359,13 +381,14 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
         tab.prev()
       } else if (w - x < side) {
         tab.next()
-      } else if (mobile) {
+      } else if (mobile && !tab.runtimePolicy) {
         setNavbar((a) => !a)
       }
     }
   })
 
   useEventListener(iframe, 'wheel', (e) => {
+    if (!tab.canInteract) return
     if (e.ctrlKey || e.metaKey || isReaderViewportZoomed(iframe)) return
     if (e.deltaY < 0) {
       tab.prev()
@@ -377,7 +400,7 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
   useEventListener(iframe, 'keydown', handleKeyDown(tab))
 
   useEventListener(iframe, 'touchstart', (e) => {
-    if (!iframe) return
+    if (!iframe || !tab.canInteract) return
     // A second finger invalidates any pending one-finger page turn.
     iframe.ontouchend = undefined
     if (!canTurnReaderPage(iframe, e.touches.length)) return
@@ -390,6 +413,7 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
     // to remove the previous listener.
     iframe.ontouchend = function handleTouchEnd(e: TouchEvent) {
       iframe.ontouchend = undefined
+      if (!tab.canInteract) return
       if (
         e.touches.length ||
         e.changedTouches.length !== 1 ||
@@ -445,7 +469,7 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
       <PhotoSlider
         images={[{ src, key: 0 }]}
         visible={!!src}
-        onClose={() => setSrc(undefined)}
+        onClose={dismissImage}
         maskOpacity={0.6}
         bannerVisible={false}
       />
@@ -477,6 +501,7 @@ interface ReaderPaneHeaderProps {
   tab: BookTab
 }
 const ReaderPaneHeader: React.FC<ReaderPaneHeaderProps> = ({ tab }) => {
+  const companion = !!tab.runtimePolicy
   const setAction = useSetAction()
   const mobile = useMobile()
   const [navbar, setNavbar] = useRecoilState(navbarState)
@@ -500,16 +525,18 @@ const ReaderPaneHeader: React.FC<ReaderPaneHeaderProps> = ({ tab }) => {
   return (
     <>
       <Bar className="flow-listening-reader-header">
-        <button
-          type="button"
-          className="flow-listening-entry shrink-0"
-          onClick={() => {
-            reader.addTab(tab)
-            setAction('listening')
-          }}
-        >
-          <MdHeadset aria-hidden="true" /> Listen
-        </button>
+        {!companion && (
+          <button
+            type="button"
+            className="flow-listening-entry shrink-0"
+            onClick={() => {
+              reader.addTab(tab)
+              setAction('listening')
+            }}
+          >
+            <MdHeadset aria-hidden="true" /> Listen
+          </button>
+        )}
         <div className="scroll-h flex min-w-0 flex-1">
           {navPath.map((item, i) => (
             <button
@@ -523,7 +550,7 @@ const ReaderPaneHeader: React.FC<ReaderPaneHeaderProps> = ({ tab }) => {
             </button>
           ))}
         </div>
-        {mobile && (
+        {mobile && !companion && (
           <button
             type="button"
             className="flow-listening-entry shrink-0"
@@ -539,7 +566,7 @@ const ReaderPaneHeader: React.FC<ReaderPaneHeaderProps> = ({ tab }) => {
           </div>
         )}
       </Bar>
-      {showGuidance && (
+      {showGuidance && !companion && (
         <div className="flow-reader-guidance">
           <p>
             Use Tools for contents, search, notes and reading appearance. You

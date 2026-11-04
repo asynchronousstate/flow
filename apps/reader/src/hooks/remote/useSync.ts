@@ -10,7 +10,7 @@ import { useRemoteBooks } from './useRemote'
 
 export function useSync(tab: BookTab) {
   const { mutate } = useRemoteBooks()
-  const { location, book } = useSnapshot(tab)
+  const { book } = useSnapshot(tab)
 
   const id = tab.book.id
 
@@ -41,10 +41,10 @@ export function useSync(tab: BookTab) {
 
   useEffect(() => {
     sync({
-      cfi: location?.start.cfi,
+      cfi: book.cfi,
       percentage: book.percentage,
     })
-  }, [sync, book.percentage, location?.start.cfi])
+  }, [sync, book.percentage, book.cfi])
 
   useEffect(() => {
     sync({

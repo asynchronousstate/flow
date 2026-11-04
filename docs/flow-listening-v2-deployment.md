@@ -1,8 +1,10 @@
-# Flow Listening 2.3 on Vercel
+# Flow Listening 2.4 on Vercel
 
 Production: https://flow-listening-v2.vercel.app
 
-Latest GitHub release: https://github.com/asynchronousstate/flow/releases/tag/v2.3.1
+Release version: **2.4.0**. See the [GitHub release and publication receipt](https://github.com/asynchronousstate/flow/releases/tag/v2.4.0)
+for its merged source commit, deployment identifier and live checks, and the
+[2.4 source verification](flow-listening-v2.4-release.md) for build and UI evidence.
 
 This project deploys the integrated Next.js reader in `apps/reader`. The earlier
 standalone PWA remains at `flow-listening.vercel.app`; its static-export script
@@ -32,7 +34,25 @@ configuration. Local library/import/listening works without those credentials.
 Sentry is enabled only when the deployer supplies a DSN. The old Docker recipe
 was not part of this Vercel validation.
 
-## Publishing another version
+## Source and release strategy
+
+Version 2.4 selects Classic Ribbon for every integrated listening session,
+including existing session URLs without a toolbar parameter and old prototype
+variant links. The former comparison route becomes a library entry; Sheets and
+Workspace are not offered as release choices. The original prototype evidence
+is retained in the [historical evaluation record](listening-toolbar-evaluation.md).
+
+Publish the reviewed source to GitHub before deployment. After the final checks
+and merge, create the new `v2.4.0` tag and release on that exact source commit.
+Keep the existing 2.3 tags and release records unchanged. Record the verified
+commit, release URL and deployment identifier on the GitHub release page.
+
+Keep the existing production project, origin and PWA identity. Its manifest
+retains `id`, `start_url` and `scope` as `/`; generated service-worker revisions
+come from the production build. A release does not require deleting the local
+library or changing the IndexedDB schema.
+
+## Deploying the reviewed version
 
 Commit and push the source version first. From the repository root, with the
 Vercel CLI authenticated and this project linked:
@@ -41,7 +61,7 @@ Vercel CLI authenticated and this project linked:
 vercel deploy --prod --scope asynchronousstate --project flow-listening-v2 --local-config apps/reader/vercel.json
 ```
 
-This release uses CLI deployment. Automatic deployment on Git pushes is not
+This project uses CLI deployment. Automatic deployment on Git pushes is not
 configured; connecting the Vercel project's GitHub integration is separate.
 
 `.gitignore` and `.vercelignore` exclude local environment files, hosting
@@ -49,7 +69,35 @@ identities, `.tmp`, recordings and imported test books. Vercel's dry run include
 only the source/build inputs and public assets. Public Alice is the existing
 repository fixture; private Gunboat and its recordings remain local.
 
-## Verification
+## Version 2.4 verification status
+
+The promoted reader production build passed lint, TypeScript, compilation and
+all 30 localized static pages. All 166 regression groups were rerun and passed.
+Final in-app browser checks confirmed the no-query Ribbon default, all eight
+feature panels, Settings 2.4, old variant links preserving identical session
+prose, immediate Bookmark switching/Undo, Home/reopen and the saved chapter range.
+Source navigation followed by Return to book kept the newer 16% reading
+position rather than the older launch location. Narrow 320 px layout had no
+horizontal overflow and kept the last paragraph above the fixed bar. See the
+[full release verification](flow-listening-v2.4-release.md).
+
+Aggregate workspace build/lint still fail on the existing vendored EPUBJS POSIX
+shell fragments under Windows; the marketing homepage also fails prerendering
+three locales. Reader build and reader/website lint passed independently.
+
+The final native Android Chrome promotion check passed: default Ribbon with all
+nine controls, Settings 2.4, native Back, Home retaining 3% reading progress and
+the saved Bookmark, and one-tap Listen restoring the chapter range and Bookmark
+default. Before recording v2.4 as live on the GitHub release, check the public library,
+`/listen`, `/manifest.json`, `/sw.js`, icons and generated Workbox runtime at the
+production origin, including cache-revalidation headers. The manifest identity
+and database schema are unchanged; no fresh v2.4 PWA installation result has
+been recorded.
+
+`scripts/test-listening-pwa.cjs` targets the separate standalone app and its
+`manifest.webmanifest`; it is not integrated-reader PWA release evidence.
+
+## Earlier production verification (2.3.x)
 
 - The clean Linux production build passed lint/types, compilation and all 30
   localized static pages, with the original API routes retained.

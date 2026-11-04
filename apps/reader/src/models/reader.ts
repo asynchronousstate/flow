@@ -11,6 +11,7 @@ import Section from '@flow/epubjs/types/section'
 import { AnnotationColor, AnnotationType } from '../annotation'
 import { BookRecord, db } from '../db'
 import { fileToEpub } from '../file'
+import type { ListeningMarker } from '../listening/integrated'
 import { defaultStyle } from '../styles'
 
 import { dfs, find, INode } from './tree'
@@ -76,7 +77,29 @@ class BaseTab {
 // https://github.com/pmndrs/valtio/blob/92f3311f7f1a9fe2a22096cd30f9174b860488ed/src/vanilla.ts#L6
 type AsRef = { $$valtioRef: true }
 
+/** Optional lifecycle controls for an embedded original reader. Ordinary reader
+ * tabs omit this policy and retain their existing navigation/persistence. */
+export interface BookTabRuntimePolicy {
+  isActive(): boolean
+  isDisposed(): boolean
+  onNavigation(): void
+  onDisplay?(): void
+  onOverlayChange?(type: BookTabSourceOverlayType | undefined): void
+  saveListeningBookmark?(marker: ListeningMarker): Promise<void>
+  shouldPersistProgress(): boolean
+  track(task: PromiseLike<unknown>): void
+}
+
+export type BookTabSourceOverlayType = 'selection' | 'note' | 'image'
+
+interface BookTabSourceOverlay {
+  type: BookTabSourceOverlayType
+  dismiss: () => void
+}
+
 export class BookTab extends BaseTab {
+  runtimePolicy?: BookTabRuntimePolicy
+  sourceOverlay?: BookTabSourceOverlay
   epub?: Book
   iframe?: Window & AsRef
   rendition?: Rendition & { manager?: any }
@@ -97,8 +120,51 @@ export class BookTab extends BaseTab {
     return this.timeline[0]?.location
   }
 
+  get canInteract() {
+    return !this.runtimePolicy || this.runtimePolicy.isActive()
+  }
+
+  noteReaderNavigation() {
+    if (this.canInteract) this.runtimePolicy?.onNavigation()
+  }
+
+  setSourceOverlay(type: BookTabSourceOverlayType, dismiss: () => void) {
+    if (!this.runtimePolicy || !this.canInteract) return
+    if (
+      this.sourceOverlay?.type === type &&
+      this.sourceOverlay.dismiss === dismiss
+    )
+      return
+    this.sourceOverlay = ref({ type, dismiss })
+    this.runtimePolicy.onOverlayChange?.(type)
+  }
+
+  clearSourceOverlay(dismiss?: () => void) {
+    if (
+      !this.sourceOverlay ||
+      (dismiss && this.sourceOverlay.dismiss !== dismiss)
+    )
+      return
+    this.sourceOverlay = undefined
+    this.runtimePolicy?.onOverlayChange?.(undefined)
+  }
+
+  dismissSourceOverlay() {
+    const overlay = this.sourceOverlay
+    if (!overlay) return
+    this.clearSourceOverlay(overlay.dismiss)
+    overlay.dismiss()
+  }
+
+  private trackTask(task: PromiseLike<unknown> | undefined) {
+    if (task) this.runtimePolicy?.track(task)
+  }
+
   display(target?: string, returnable = true) {
-    this.rendition?.display(target)
+    if (!this.canInteract) return
+    this.noteReaderNavigation()
+    this.trackTask(this.rendition?.display(target))
+    if (this.rendition) this.runtimePolicy?.onDisplay?.()
     if (returnable) this.showPrevLocation()
   }
   displayFromSelector(selector: string, section: ISection, returnable = true) {
@@ -110,24 +176,31 @@ export class BookTab extends BaseTab {
     }
   }
   prev() {
-    this.rendition?.prev()
+    if (!this.canInteract) return
+    this.noteReaderNavigation()
+    this.trackTask(this.rendition?.prev())
+    if (this.rendition) this.runtimePolicy?.onDisplay?.()
     // avoid content flash
     if (this.container?.scrollLeft === 0 && !this.location?.atStart) {
       this.rendered = false
     }
   }
   next() {
-    this.rendition?.next()
+    if (!this.canInteract) return
+    this.noteReaderNavigation()
+    this.trackTask(this.rendition?.next())
+    if (this.rendition) this.runtimePolicy?.onDisplay?.()
   }
 
   updateBook(changes: Partial<BookRecord>) {
+    if (this.runtimePolicy?.isDisposed()) return
     changes = {
       ...changes,
       updatedAt: Date.now(),
     }
     // don't wait promise resolve to make valtio batch updates
     this.book = { ...this.book, ...changes }
-    db?.books.update(this.book.id, changes)
+    this.trackTask(db?.books.update(this.book.id, changes))
   }
 
   annotationRange?: Range
@@ -263,7 +336,7 @@ export class BookTab extends BaseTab {
   }
 
   get view() {
-    return this.rendition?.manager?.views._views[0]
+    return this.rendition?.manager?.views?._views?.[0]
   }
 
   getNavPath(navItem = this.currentNavItem) {
@@ -327,38 +400,94 @@ export class BookTab extends BaseTab {
   }
 
   private _el?: HTMLDivElement
+  private _renderGeneration = 0
   onRender?: () => void
+
+  /** Pause an unmounted reader while retaining its logical book/history. Old
+   * engine callbacks remain inert even after this tab is mounted again. */
+  disposeRender() {
+    this._renderGeneration++
+    const epub = this.epub
+    const rendition = this.rendition
+    if (this.iframe) this.iframe.ontouchend = undefined
+    this.dismissSourceOverlay()
+    this._el = undefined
+    this.epub = undefined
+    this.rendition = undefined
+    this.iframe = undefined
+    this.section = undefined
+    this.sections = undefined
+    this.nav = undefined
+    this.results = undefined
+    this.activeResultID = undefined
+    this.annotationRange = undefined
+    this.onRender = undefined
+    this.rendered = false
+    try {
+      if (epub) epub.destroy()
+      else rendition?.destroy()
+    } catch {
+      try {
+        rendition?.destroy()
+      } catch {
+        // A partially attached engine must not prevent preserving its tab.
+      }
+    }
+  }
+
   async render(el: HTMLDivElement) {
+    if (this.runtimePolicy?.isDisposed()) return
     if (el === this._el) return
+    const generation = ++this._renderGeneration
+    const isCurrent = () =>
+      generation === this._renderGeneration && !this.runtimePolicy?.isDisposed()
     this._el = ref(el)
 
     const file = await db?.files.get(this.book.id)
-    if (!file) return
+    if (!file || !isCurrent()) return
 
-    this.epub = ref(await fileToEpub(file.file))
+    const epub = await fileToEpub(file.file)
+    if (!isCurrent()) {
+      epub.destroy()
+      return
+    }
+    this.epub = ref(epub)
 
-    this.epub.loaded.navigation.then((nav) => {
-      this.nav = nav
-    })
-    console.log(this.epub)
-    this.epub.loaded.spine.then((spine: any) => {
-      const sections = spine.spineItems as ISection[]
-      // https://github.com/futurepress/epub.js/issues/887#issuecomment-700736486
-      const promises = sections.map((s) =>
-        s.load(this.epub?.load.bind(this.epub)),
-      )
-
-      Promise.all(promises).then(() => {
-        sections.forEach((s) => {
-          s.length = s.document.body.textContent?.length ?? 0
-          s.images = [...s.document.querySelectorAll('img')].map((el) => el.src)
-          this.epub!.loaded.navigation.then(() => {
-            s.navitem = this.mapSectionToNavItem(s.href)
-          })
-        })
-        this.sections = ref(sections)
+    const navigation = epub.loaded.navigation
+      .then((nav) => {
+        if (isCurrent()) this.nav = nav
       })
-    })
+      .catch((error: unknown) => {
+        if (isCurrent()) throw error
+      })
+    this.trackTask(navigation)
+    console.log(this.epub)
+    const sectionsReady = epub.loaded.spine
+      .then((spine: any) => {
+        if (!isCurrent()) return
+        const sections = spine.spineItems as ISection[]
+        // https://github.com/futurepress/epub.js/issues/887#issuecomment-700736486
+        const promises = sections.map((s) => s.load(epub.load.bind(epub)))
+
+        return Promise.all(promises).then(() => {
+          if (!isCurrent()) return
+          sections.forEach((s) => {
+            s.length = s.document.body.textContent?.length ?? 0
+            s.images = [...s.document.querySelectorAll('img')].map(
+              (el) => el.src,
+            )
+            epub.loaded.navigation.then(() => {
+              if (isCurrent()) s.navitem = this.mapSectionToNavItem(s.href)
+            })
+          })
+          this.sections = ref(sections)
+          if (this.keyword) this.onKeywordChange()
+        })
+      })
+      .catch((error: unknown) => {
+        if (isCurrent()) throw error
+      })
+    this.trackTask(sectionsReady)
     this.rendition = ref(
       this.epub.renderTo(el, {
         width: '100%',
@@ -367,16 +496,20 @@ export class BookTab extends BaseTab {
       }),
     )
     console.log(this.rendition)
-    this.rendition.display(
-      this.location?.start.cfi ?? this.book.cfi ?? undefined,
+    this.trackTask(
+      this.rendition.display(
+        this.location?.start.cfi ?? this.book.cfi ?? undefined,
+      ),
     )
     this.rendition.themes.default(defaultStyle)
     this.rendition.hooks.render.register((view: any) => {
+      if (!isCurrent()) return
       console.log('hooks.render', view)
       this.onRender?.()
     })
 
     this.rendition.on('relocated', (loc: Location) => {
+      if (!isCurrent()) return
       console.log('relocated', loc)
       this.rendered = true
       this.timeline.unshift({
@@ -384,8 +517,10 @@ export class BookTab extends BaseTab {
         timestamp: Date.now(),
       })
 
+      const persistProgress =
+        !this.runtimePolicy || this.runtimePolicy.shouldPersistProgress()
       // calculate percentage
-      if (this.sections) {
+      if (this.sections && persistProgress) {
         const start = loc.start
         const i = this.sections.findIndex((s) => s.href === start.href)
         const previousSectionsLength = this.sections
@@ -415,6 +550,7 @@ export class BookTab extends BaseTab {
       console.log('displayed', args)
     })
     this.rendition.on('rendered', (section: ISection, view: any) => {
+      if (!isCurrent()) return
       console.log('rendered', [section, view])
       this.section = ref(section)
       this.iframe = ref(view.window as Window)

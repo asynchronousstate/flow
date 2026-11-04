@@ -29,7 +29,7 @@ function readEntry(state: unknown): PanelEntry | undefined {
     typeof entry.route !== 'string' ||
     !Array.isArray(entry.trail) ||
     !entry.trail.length ||
-    entry.trail.length > 3 ||
+    entry.trail.length > 4 ||
     entry.trail.some(
       (view) =>
         !view ||
@@ -115,7 +115,7 @@ export function createMobilePanelHistory(
     ) {
       // Switching tools is one overlay level, not a stack of every tool opened.
       write('replaceState', [...entry.trail.slice(0, -1), { ...view }])
-    } else if (entry.trail.length < 3) {
+    } else if (entry.trail.length < 4) {
       write('pushState', [...entry.trail, { ...view }])
     } else {
       write('replaceState', [...entry.trail.slice(0, -1), { ...view }])
@@ -138,5 +138,16 @@ export function createMobilePanelHistory(
     return true
   }
 
-  return { sync, restore }
+  function replace(view: MobilePanelView) {
+    if (route() !== scope) return
+    const entry = readEntry(history.state)
+    const base = { bookId: view.bookId, navbar: false }
+    const trail: MobilePanelView[] =
+      entry?.route === scope ? entry.trail.slice(0, -1) : [base]
+    if (!trail.length) trail.push(base)
+    if (!sameView(trail[trail.length - 1]!, view)) trail.push({ ...view })
+    write('replaceState', trail)
+  }
+
+  return { sync, restore, replace }
 }

@@ -182,7 +182,11 @@ class Section {
       }
     }
 
-    sprint(section.document, function (node) {
+    const content =
+      section.document.body ||
+      section.document.getElementsByTagNameNS('*', 'body')[0] ||
+      section.document.documentElement
+    sprint(content, function (node) {
       find(node)
     })
 

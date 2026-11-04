@@ -1,6 +1,6 @@
 import { Overlay } from '@literal-ui/core'
 import clsx from 'clsx'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import FocusLock from 'react-focus-lock'
 import {
   MdCopyAll,
@@ -38,6 +38,76 @@ import { layout, LayoutAnchorMode, LayoutAnchorPosition } from './base'
 interface TextSelectionMenuProps {
   tab: BookTab
 }
+
+interface CapturedTextSelection {
+  range: Range
+  cfi: string
+  text: string
+  forward: boolean
+  anchorRect: DOMRect
+  containerRect: DOMRect
+  viewRect: DOMRect
+  lineHeight?: number
+}
+
+function snapshotRect(rect: DOMRect): DOMRect {
+  return new DOMRect(rect.x, rect.y, rect.width, rect.height)
+}
+
+/** An Android keyboard can collapse Selection or temporarily remove the EPUB
+ * view while it repaginates. Capture the editing target once; neither event is
+ * a request to dismiss a selection menu or discard a note draft.
+ */
+function captureTextSelection(
+  tab: BookTab,
+  selection: Selection | undefined,
+  annotationRange: Range | undefined,
+  element: HTMLElement | undefined,
+): CapturedTextSelection | undefined {
+  if (!element?.parentElement) return
+  try {
+    const source =
+      selection && !selection.isCollapsed && selection.rangeCount
+        ? selection.getRangeAt(0)
+        : annotationRange
+    if (!source) return
+    const range = source.cloneRange()
+    const text = range.cloneContents().textContent?.trim()
+    if (!text) return
+    const forward = isTouchScreen
+      ? false
+      : selection && !selection.isCollapsed
+      ? isForwardSelection(selection)
+      : true
+    const rects = [...range.getClientRects()].filter((rect) =>
+      Math.round(rect.width),
+    )
+    const anchorRect = forward ? last(rects) : rects[0]
+    if (!anchorRect) return
+    const containerRect = element.parentElement.getBoundingClientRect()
+    const viewRect = element.getBoundingClientRect()
+    if (!containerRect.width || !containerRect.height || !viewRect.width) return
+    const parent = (forward ? range.endContainer : range.startContainer)
+      .parentElement
+    const lineHeight = parent
+      ? parseFloat(getComputedStyle(parent).lineHeight)
+      : NaN
+    return {
+      range,
+      cfi: tab.rangeToCfi(range),
+      text,
+      forward,
+      anchorRect: snapshotRect(anchorRect),
+      containerRect: snapshotRect(containerRect),
+      viewRect: snapshotRect(viewRect),
+      ...(Number.isFinite(lineHeight) ? { lineHeight } : {}),
+    }
+  } catch {
+    // A view still being attached has no usable selection geometry yet.
+    return undefined
+  }
+}
+
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({
   tab,
 }) => {
@@ -51,58 +121,71 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({
 
   const win = view()?.window
   const [selection, setSelection] = useTextSelection(win)
+  const captured = useRef<CapturedTextSelection>()
+  const ignoredAnnotation = useRef<Range>()
+  const latestSelection = useRef(selection)
+  const latestWindow = useRef(win)
+  latestSelection.current = selection
+  latestWindow.current = win
+  const [, refresh] = useState(0)
+  const hide = useCallback(() => {
+    ignoredAnnotation.current = tab.annotationRange
+    captured.current = undefined
+    try {
+      latestSelection.current?.removeAllRanges()
+      latestWindow.current?.getSelection()?.removeAllRanges()
+    } catch {
+      // The old frame may already have been replaced by repagination.
+    }
+    setSelection(undefined)
+    if (tab.annotationRange) tab.annotationRange = undefined
+    refresh((value) => value + 1)
+  }, [setSelection, tab])
 
   // If text selection menu is disabled, don't render it
   if (settings.enableTextSelectionMenu === false) {
+    captured.current = undefined
     return null
   }
 
-  const el = view()?.element as HTMLElement
-  if (!el) return null
+  const el = view()?.element as HTMLElement | undefined
+  if (!captured.current)
+    captured.current = captureTextSelection(
+      tab,
+      selection,
+      annotationRange === ignoredAnnotation.current
+        ? undefined
+        : (annotationRange as Range | undefined),
+      el,
+    )
+  const descriptor = captured.current
+  if (!descriptor) return null
 
-  // it is possible that both `selection` and `tab.annotationRange`
-  // are set when select end within an annotation
-  const range = selection?.getRangeAt(0) ?? annotationRange
-  if (!range) return null
-
-  // prefer to display above the selection to avoid text selection helpers
-  // https://stackoverflow.com/questions/68081757/hide-the-two-text-selection-helpers-in-mobile-browsers
-  const forward = isTouchScreen
-    ? false
-    : selection
-    ? isForwardSelection(selection)
-    : true
-
-  const rects = [...range.getClientRects()].filter((r) => Math.round(r.width))
-  const anchorRect = rects && (forward ? last(rects) : rects[0])
-  if (!anchorRect) return null
-
-  const contents = range.cloneContents()
-  const text = contents.textContent?.trim()
-  if (!text) return null
+  // Refresh geometry when a live viewport is available, retaining the captured
+  // bounds during a transient missing/zero-sized view. The same renderer stays
+  // mounted, so opening the IME cannot reset annotate state or textarea text.
+  if (el?.parentElement) {
+    const containerRect = el.parentElement.getBoundingClientRect()
+    const viewRect = el.getBoundingClientRect()
+    if (containerRect.width && containerRect.height && viewRect.width) {
+      descriptor.containerRect = snapshotRect(containerRect)
+      descriptor.viewRect = snapshotRect(viewRect)
+    }
+  }
 
   return (
-    // to reset inner state
     <TextSelectionMenuRenderer
+      key={descriptor.cfi}
       tab={tab}
-      range={range as Range}
-      anchorRect={anchorRect}
-      containerRect={el.parentElement!.getBoundingClientRect()}
-      viewRect={el.getBoundingClientRect()}
-      text={text}
-      forward={forward}
-      hide={() => {
-        if (selection) {
-          selection.removeAllRanges()
-          setSelection(undefined)
-        }
-        /**
-         * {@link range}
-         */
-        if (tab.annotationRange) {
-          tab.annotationRange = undefined
-        }
-      }}
+      range={descriptor.range}
+      capturedCFI={descriptor.cfi}
+      capturedLineHeight={descriptor.lineHeight}
+      anchorRect={descriptor.anchorRect}
+      containerRect={descriptor.containerRect}
+      viewRect={descriptor.viewRect}
+      text={descriptor.text}
+      forward={descriptor.forward}
+      hide={hide}
     />
   )
 }
@@ -113,6 +196,8 @@ const ANNOTATION_SIZE = scale(24, 30)
 interface TextSelectionMenuRendererProps {
   tab: BookTab
   range: Range
+  capturedCFI?: string
+  capturedLineHeight?: number
   anchorRect: DOMRect
   containerRect: DOMRect
   viewRect: DOMRect
@@ -123,6 +208,8 @@ interface TextSelectionMenuRendererProps {
 const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
   tab,
   range,
+  capturedCFI,
+  capturedLineHeight,
   anchorRect,
   containerRect,
   viewRect,
@@ -137,36 +224,86 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
   const mobile = useMobile()
   const t = useTranslation('menu')
 
-  const cfi = tab.rangeToCfi(range)
+  const cfi = capturedCFI ?? tab.rangeToCfi(range)
   const annotation = tab.book.annotations.find((a) => a.cfi === cfi)
   const [annotate, setAnnotate] = useState(!!annotation)
   const [savingStart, setSavingStart] = useState(false)
   const [listeningError, setListeningError] = useState('')
+  const hideRef = useRef(hide)
+  hideRef.current = hide
+  const dismiss = useCallback(() => hideRef.current(), [])
+  const mounted = useRef(true)
+  const saveInFlight = useRef(false)
 
-  async function saveListeningStart() {
-    const selectedRange = range.cloneRange()
-    const sourceHref = tab.view?.section?.href ?? tab.currentHref
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!tab.runtimePolicy) return
+    tab.setSourceOverlay(annotate ? 'note' : 'selection', dismiss)
+    return () => tab.clearSourceOverlay(dismiss)
+  }, [annotate, dismiss, tab])
+
+  function saveListeningStart() {
+    const policy = tab.runtimePolicy
+    const canContinue = () =>
+      mounted.current &&
+      (!policy || (!policy.isDisposed() && policy.isActive()))
+    if (saveInFlight.current || !canContinue()) return
+    saveInFlight.current = true
     setSavingStart(true)
     setListeningError('')
-    try {
+
+    const operation = (async () => {
+      const selectedRange = range.cloneRange()
+      const sourceHref = tab.view?.section?.href ?? tab.currentHref
       if (!sourceHref)
         throw new Error('Wait for this chapter to finish loading.')
       const { book, record } = await loadLibraryListeningBook(tab.book.id)
+      // A Home/Back action can close or dispose this source while the EPUB is
+      // being checked. Its old selection must not recreate a reader tab.
+      if (!canContinue()) return
       const marker = markerFromRange(book, sourceHref, selectedRange, cfi)
       marker.chapterTitle = chapterForBookmark(book, marker).title
-      await saveLibraryMarker(tab.book.id, marker, record.fingerprint)
-      reader.addTab(tab)
-      setAction('listening')
-      hide()
-    } catch (error) {
-      setListeningError(
-        error instanceof Error
-          ? error.message
-          : 'Could not save this bookmark.',
-      )
-    } finally {
-      setSavingStart(false)
-    }
+      if (policy) {
+        if (!policy.saveListeningBookmark)
+          throw new Error(
+            'Return to the listening document to save this Bookmark.',
+          )
+        // The companion uses Quiet's one Bookmark coordinator, toast and Undo
+        // history. It must never run the ordinary reader's tab-opening path.
+        await policy.saveListeningBookmark(marker)
+      } else {
+        await saveLibraryMarker(tab.book.id, marker, record.fingerprint)
+        if (!canContinue()) return
+        reader.addTab(tab)
+        setAction('listening')
+      }
+      if (canContinue()) dismiss()
+    })()
+
+    const lifecycle = operation
+      .catch((error: unknown) => {
+        if (!mounted.current || !canContinue()) return
+        setListeningError(
+          error instanceof Error
+            ? error.message
+            : 'Could not save this bookmark.',
+        )
+      })
+      .finally(() => {
+        saveInFlight.current = false
+        if (mounted.current) setSavingStart(false)
+      })
+    // Register before the first asynchronous preparation can finish, so Home
+    // waits for both parsing and the subsequent shared Bookmark save. Local
+    // validation errors are displayed above without poisoning the write queue.
+    policy?.track(lifecycle)
+    return lifecycle
   }
 
   const position = forward
@@ -175,9 +312,11 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
 
   const { zoom } = useTypography(tab)
   const endContainer = forward ? range.endContainer : range.startContainer
-  const _lineHeight = parseFloat(
-    getComputedStyle(endContainer.parentElement!).lineHeight,
-  )
+  const _lineHeight =
+    capturedLineHeight ??
+    (endContainer.parentElement
+      ? parseFloat(getComputedStyle(endContainer.parentElement).lineHeight)
+      : NaN)
   // no custom line height and the origin is keyword, e.g. 'normal'.
   const lineHeight = isNaN(_lineHeight)
     ? anchorRect.height
