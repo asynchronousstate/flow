@@ -1,6 +1,7 @@
 import { Overlay } from '@literal-ui/core'
 import clsx from 'clsx'
-import { ComponentProps, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/router'
+import { ComponentProps, Fragment, useEffect, useRef, useState } from 'react'
 import { useMemo } from 'react'
 import { IconType } from 'react-icons'
 import {
@@ -158,7 +159,10 @@ interface EnvActionBarProps extends ComponentProps<'div'> {
 
 function ViewActionBar({ className, env }: EnvActionBarProps) {
   const [action, setAction] = useAction()
+  const { focusedTab } = useReaderSnapshot()
+  const router = useRouter()
   const t = useTranslation()
+  const showHome = env === Env.Desktop && focusedTab?.isBook
 
   return (
     <ActionBar className={className}>
@@ -167,15 +171,29 @@ function ViewActionBar({ className, env }: EnvActionBarProps) {
         .map(({ name, title, Icon }) => {
           const active = action === name
           return (
-            <Action
-              title={name === 'listening' ? title : t(`${title}.title`)}
-              Icon={Icon}
-              active={active}
-              aria-pressed={active}
-              aria-controls="flow-reader-panel"
-              onClick={() => setAction(active ? undefined : name)}
-              key={name}
-            />
+            <Fragment key={name}>
+              <Action
+                title={name === 'listening' ? title : t(`${title}.title`)}
+                Icon={Icon}
+                active={active}
+                aria-pressed={active}
+                aria-controls="flow-reader-panel"
+                onClick={() => setAction(active ? undefined : name)}
+              />
+              {name === 'listening' && showHome && (
+                <Action
+                  type="button"
+                  title={t('home.title')}
+                  aria-label={t('home.title')}
+                  Icon={RiHome6Line}
+                  onClick={() => {
+                    reader.clear()
+                    setAction('toc')
+                    if (router.asPath !== '/') void router.replace('/')
+                  }}
+                />
+              )}
+            </Fragment>
           )
         })}
     </ActionBar>
