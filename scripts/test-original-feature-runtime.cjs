@@ -191,6 +191,7 @@ function load() {
       if (name === 'uuid') return { v4: () => `group-${++nextId}` }
       if (name === 'valtio') return { ...valtio, subscribe: () => () => {} }
       if (name === '../db') return { db: database }
+      if (name === '../book-annotations') return {}
       if (name === '../file')
         return {
           fileToEpub: async () => {

@@ -167,6 +167,10 @@
   cursor: not-allowed;
 }
 
+.flow-library-actions > :last-child:nth-child(3) {
+  grid-column: 1 / -1;
+}
+
 .flow-library button:focus-visible,
 .flow-library input:focus-visible {
   outline: 2px solid rgb(var(--md-sys-color-primary));

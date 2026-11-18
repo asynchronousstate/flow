@@ -43,6 +43,7 @@ import {
   readingResumeSummary,
 } from '../library/presentation'
 import {
+  createQuietLaunch,
   loadLibraryListeningBook,
   loadQuietLaunch,
 } from '../listening/integrated'
@@ -844,6 +845,27 @@ const Book: React.FC<BookProps> = ({
     }
   }
 
+  async function resumeListening() {
+    if (opening || !hasLocalFile) return
+    setListenError('')
+    setOpening(true)
+    try {
+      const { record } = await loadLibraryListeningBook(book.id)
+      const session = await createQuietLaunch(book.id, {
+        ...record,
+        startAt: 'marker',
+      })
+      await router.push({
+        pathname: '/listen',
+        query: { book: book.id, session },
+      })
+    } catch {
+      await openBook(true)
+    } finally {
+      setOpening(false)
+    }
+  }
+
   return (
     <li className="flow-library-card">
       <button
@@ -958,6 +980,16 @@ const Book: React.FC<BookProps> = ({
           >
             <MdHeadset aria-hidden="true" /> Listen
           </button>
+          {listeningStart.bookmark && hasLocalFile && (
+            <button
+              type="button"
+              disabled={loading || opening}
+              aria-label={`Resume listening to ${details.title}`}
+              onClick={resumeListening}
+            >
+              <MdHeadset aria-hidden="true" /> Resume listening
+            </button>
+          )}
         </div>
       )}
       {listenError && (

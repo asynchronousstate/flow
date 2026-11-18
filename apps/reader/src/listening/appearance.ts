@@ -1,8 +1,19 @@
 import type { Settings, TypographyConfiguration } from '../state'
 
+export const listeningFontFamilies = {
+  serif: "Georgia, 'Times New Roman', serif",
+  sans: "'Segoe UI', Arial, sans-serif",
+  monospace: "Consolas, 'Courier New', monospace",
+}
+
 export interface ListeningAppearanceChoice {
   preset: 'comfortable' | 'large' | 'compact' | 'reading'
   theme: 'light' | 'dark' | 'sepia' | 'reading'
+  font?: keyof typeof listeningFontFamilies
+  fontSize?: number
+  lineHeight?: number
+  textWidth?: number
+  quickBookmarks?: boolean
 }
 
 export interface ListeningAppearance {
@@ -11,6 +22,8 @@ export interface ListeningAppearance {
   fontFamily: string
   fontWeight: number
   theme: 'light' | 'dark' | 'sepia'
+  textWidth?: number
+  quickBookmarks?: boolean
 }
 
 export const defaultListeningAppearance: ListeningAppearanceChoice = {
@@ -33,6 +46,20 @@ export function normalizeListeningAppearance(
     theme: ['light', 'dark', 'sepia', 'reading'].includes(choice?.theme || '')
       ? choice!.theme
       : 'light',
+    ...(choice?.font &&
+    Object.prototype.hasOwnProperty.call(listeningFontFamilies, choice.font)
+      ? { font: choice.font }
+      : {}),
+    ...(typeof choice?.fontSize === 'number'
+      ? { fontSize: clamp(choice.fontSize, 16, 48, 22) }
+      : {}),
+    ...(typeof choice?.lineHeight === 'number'
+      ? { lineHeight: clamp(choice.lineHeight, 1.2, 2.5, 1.75) }
+      : {}),
+    ...(typeof choice?.textWidth === 'number'
+      ? { textWidth: clamp(choice.textWidth, 40, 90, 68) }
+      : {}),
+    ...(choice?.quickBookmarks === false ? { quickBookmarks: false } : {}),
   }
 }
 
@@ -74,18 +101,23 @@ export function resolveListeningAppearance(
   }[choice.preset]
   return {
     ...preset,
-    fontFamily:
-      choice.preset === 'reading' &&
-      typeof effective.fontFamily === 'string' &&
-      effective.fontFamily
-        ? effective.fontFamily
-        : "Georgia, 'Times New Roman', serif",
+    fontSize: choice.fontSize ?? preset.fontSize,
+    lineHeight: choice.lineHeight ?? preset.lineHeight,
+    fontFamily: choice.font
+      ? listeningFontFamilies[choice.font]
+      : choice.preset === 'reading' &&
+        typeof effective.fontFamily === 'string' &&
+        effective.fontFamily
+      ? effective.fontFamily
+      : listeningFontFamilies.serif,
     fontWeight:
       choice.preset === 'reading'
         ? clamp(Number(effective.fontWeight ?? 400), 100, 900, 400)
         : 400,
     theme:
       choice.theme === 'reading' ? (dark ? 'dark' : 'light') : choice.theme,
+    ...(choice.textWidth ? { textWidth: choice.textWidth } : {}),
+    ...(choice.quickBookmarks === false ? { quickBookmarks: false } : {}),
   }
 }
 

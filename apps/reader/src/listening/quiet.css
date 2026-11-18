@@ -211,7 +211,7 @@
 }
 
 .flow-quiet-article {
-  width: min(100%, 780px);
+  width: min(100%, var(--quiet-text-width, 780px));
   margin: 0 auto;
   padding: 40px 28px 220px;
   font-family: var(--quiet-font-family, Georgia, 'Times New Roman', serif);
@@ -270,9 +270,131 @@
   position: relative;
 }
 
+.flow-quiet-marks {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.flow-quiet-marks > span,
+.flow-quiet-marks > button {
+  position: absolute;
+}
+
+.flow-quiet .flow-quiet-marks .flow-quiet-note-marker {
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: inherit;
+  background: var(--quiet-panel, #f8fafb);
+  border: 1px solid var(--quiet-outline, #a7b6c0);
+  border-radius: 6px;
+  pointer-events: auto;
+}
+
+.flow-quiet[data-quiet-theme] .flow-toolkit-workspace.flow-excerpt-workspace {
+  --flow-toolkit-surface: var(--quiet-panel, #f8fafb);
+  --flow-toolkit-text: var(--quiet-foreground, #29323c);
+  --flow-toolkit-border: var(--quiet-outline, #d3dce3);
+  color-scheme: inherit;
+}
+
+.flow-excerpt-panel {
+  gap: 12px;
+  padding: 14px;
+}
+
+.flow-excerpt-panel :is(p, figure, blockquote, fieldset, ul) {
+  margin: 0;
+}
+
+.flow-excerpt-panel form {
+  display: grid;
+  gap: 12px;
+}
+
+.flow-excerpt-panel label {
+  display: block;
+  padding-block: 3px;
+}
+
+.flow-excerpt-panel
+  :is(input:not([type='radio'], [type='checkbox']), select, textarea) {
+  display: block;
+  width: 100%;
+  margin-block: 3px 0;
+  padding: 7px;
+  color: inherit;
+  background: var(--quiet-background, #fff);
+  border: 1px solid var(--flow-toolkit-border);
+  border-radius: 5px;
+}
+
+.flow-excerpt-panel :is(input[type='radio'], input[type='checkbox']) {
+  margin-inline-end: 8px;
+}
+
+.flow-excerpt-panel button:not(.flow-toolkit-heading button) {
+  padding: 8px 10px;
+  color: inherit;
+  background: var(--quiet-background, #fff);
+  border: 1px solid var(--flow-toolkit-border);
+  border-radius: 6px;
+}
+
+.flow-excerpt-panel .flow-excerpt-list {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.flow-excerpt-list li {
+  display: grid;
+  gap: 6px;
+}
+
+.flow-excerpt-list button {
+  text-align: start;
+}
+
+.flow-excerpt-list small {
+  display: block;
+  opacity: 0.85;
+}
+
+.flow-excerpt-panel figure img {
+  object-fit: contain;
+}
+
+.flow-excerpt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.flow-excerpt-selection {
+  position: fixed;
+  z-index: 66;
+  inset: auto 12px calc(var(--flow-toolkit-bottom) + 8px);
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin-inline: auto;
+  padding: 8px;
+  background: var(--quiet-panel, #f8fafb);
+  border: 1px solid var(--quiet-outline, #a7b6c0);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0002;
+}
+
 .flow-quiet-bookmarks {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -356,6 +478,7 @@
 
   .flow-quiet-article {
     padding: 28px 22px 220px;
+    padding-right: 30px;
     font-size: var(--quiet-font-size, 21px);
     line-height: var(--quiet-line-height, 1.7);
   }

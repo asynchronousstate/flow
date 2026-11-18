@@ -1,5 +1,6 @@
 import { useEventListener } from '@literal-ui/hooks'
 import clsx from 'clsx'
+import { useLiveQuery } from 'dexie-react-hooks'
 import React, {
   ComponentProps,
   useCallback,
@@ -252,6 +253,14 @@ function BookPane({ tab, onMouseDown }: BookPaneProps) {
   const [background] = useBackground()
 
   const { iframe, rendition, rendered, container } = useSnapshot(tab)
+  const sharedAnnotations = useLiveQuery(
+    async () => (await db?.books.get(tab.id))?.annotations,
+    [tab.id],
+  )
+
+  useEffect(() => {
+    if (sharedAnnotations) tab.book.annotations = sharedAnnotations
+  }, [sharedAnnotations, tab])
 
   useTilg()
 
