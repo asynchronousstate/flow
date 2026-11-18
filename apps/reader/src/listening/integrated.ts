@@ -157,6 +157,7 @@ async function readCanonicalBook(
       listeners,
     }
     preparation.promise = prepareListeningBook(data, {
+      includeSourceLocations: true,
       onProgress: (progress) => {
         preparation.progress = progress
         listeners.forEach((listener) => listener(progress))
@@ -412,6 +413,52 @@ export async function updateListeningRecord(
 ): Promise<IntegratedListeningRecord> {
   return (await changeListeningRecord(bookId, changes, expectedFingerprint))
     .record
+}
+
+export async function saveListeningAppearance(
+  bookId: string,
+  fingerprint: string,
+  sessionId: string | undefined,
+  changes: Partial<ListeningAppearanceChoice>,
+) {
+  const database = db
+  if (!database)
+    throw new Error('Open Flow in your browser to save appearance.')
+  const reading = savedReaderAppearance()
+  return database.transaction(
+    'rw',
+    database.books,
+    database.listening,
+    database.listeningSessions,
+    async () => {
+      const book = await database.books.get(bookId)
+      const current = await database.listening.get(bookId)
+      if (!book || current?.fingerprint !== fingerprint)
+        throw new ListeningBookChangedError()
+      const choice = normalizeListeningAppearance({
+        ...normalizeListeningAppearance(current.appearance),
+        ...changes,
+      })
+      const appearance = resolveListeningAppearance(
+        choice,
+        reading.settings,
+        book.configuration?.typography,
+        reading.dark,
+      )
+      await database.listening.update(bookId, {
+        appearance: choice,
+        updatedAt: Math.max(Date.now(), current.updatedAt + 1),
+      })
+      if (sessionId) {
+        const launch = await database.listeningSessions.get(sessionId)
+        if (launch?.bookId === bookId && launch.fingerprint === fingerprint)
+          await database.listeningSessions.update(sessionId, {
+            appearance,
+            plan: { ...launch.plan, appearance: choice },
+          })
+      }
+    },
+  )
 }
 
 export async function saveLibraryMarker(

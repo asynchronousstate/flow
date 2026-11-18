@@ -1,6 +1,7 @@
 import {
   compareListeningPoints,
   getBookmarkLocation,
+  getListeningChapters,
   getListeningRange,
 } from './chapters'
 import type { ListeningPoint } from './chapters'
@@ -17,6 +18,14 @@ export interface QuietListeningSession {
   title: string
   language: string
   sections: ListeningSection[]
+  chapters: QuietChapter[]
+}
+
+export interface QuietChapter {
+  id: string
+  label: string
+  depth: number
+  targetId: string
 }
 
 const paragraphAttribute = 'data-listening-paragraph'
@@ -337,6 +346,19 @@ export function buildQuietSession(
             element.removeAttribute('data-listening-source-index')
             element.removeAttribute('data-listening-block')
           }
+          const comments = doc.createTreeWalker(
+            contextHeading,
+            NodeFilter.SHOW_COMMENT,
+          )
+          const locations: Node[] = []
+          for (
+            let comment = comments.nextNode();
+            comment;
+            comment = comments.nextNode()
+          )
+            if (comment.nodeValue?.startsWith('flow-source-'))
+              locations.push(comment)
+          locations.forEach((node) => node.parentNode?.removeChild(node))
           const firstElement = output.body.firstElementChild
           const contextParent =
             firstElement && /^(DIV|SECTION|ARTICLE)$/.test(firstElement.tagName)
@@ -360,5 +382,28 @@ export function buildQuietSession(
       section.html = doc.body.innerHTML
     }
   }
-  return { title: book.title, language: book.language, sections }
+  const chapters = getListeningChapters(book)
+    .filter(
+      (chapter) =>
+        chapter.start &&
+        chapter.end &&
+        compareListeningPoints(chapter.start, range.end) < 0 &&
+        compareListeningPoints(chapter.end, start) > 0,
+    )
+    .sort((a, b) => compareListeningPoints(a.start!, b.start!))
+    .map((chapter) => {
+      const point =
+        compareListeningPoints(chapter.start!, start) < 0
+          ? start
+          : chapter.start!
+      const section = book.sections[point.sectionIndex]!
+      return {
+        id: chapter.id,
+        label: chapter.label,
+        depth: chapter.depth,
+        targetId:
+          point === chapter.start ? point.anchorId ?? section.id : section.id,
+      }
+    })
+  return { title: book.title, language: book.language, sections, chapters }
 }

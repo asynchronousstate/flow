@@ -131,6 +131,7 @@ function ListeningBookPanel({
   }, [bookId])
   const appliedPlan = useRef<AppliedListeningPlan>()
   const manualStartChoice = useRef(false)
+  const manualAppearance = useRef(false)
   const entry = useRef({ visible: false, first: true })
   const pendingDefault = useRef(false)
   const alive = useRef(true)
@@ -161,7 +162,10 @@ function ListeningBookPanel({
         (entry.current.first && !!resumeSession) ||
         isMobilePanelRestoration(bookId, 'listening')
       pendingDefault.current = !resuming
-      if (!resuming) manualStartChoice.current = false
+      if (!resuming) {
+        manualStartChoice.current = false
+        manualAppearance.current = false
+      }
       entry.current.first = false
       setOpening((value) => value + 1)
     }
@@ -229,13 +233,25 @@ function ListeningBookPanel({
         !!stored.marker && !validateListeningBookmark(book, stored.marker),
     })
     appliedPlan.current = next.applied
-    if (!next.changed) return
+    const updateAppearance =
+      !manualAppearance.current &&
+      stored.fingerprint === draft.fingerprint &&
+      JSON.stringify(stored.appearance) !== JSON.stringify(draft.appearance)
+    if (!next.changed && !updateAppearance) return
     setDraft((current) =>
       current
-        ? { ...current, marker: next.draft.marker, startAt: next.draft.startAt }
+        ? {
+            ...current,
+            marker: next.draft.marker,
+            startAt: next.draft.startAt,
+            appearance: updateAppearance
+              ? stored.appearance
+              : current.appearance,
+          }
         : current,
     )
-    setNotice('Saved Bookmark updated. Your chapter range is unchanged.')
+    if (next.changed)
+      setNotice('Saved Bookmark updated. Your chapter range is unchanged.')
     setFallbackHref('')
   }, [book, draft, stored])
 
@@ -358,6 +374,7 @@ function ListeningBookPanel({
       manualStartChoice.current = true
       pendingDefault.current = false
     }
+    if (changes.appearance) manualAppearance.current = true
     setDraft((current) => (current ? { ...current, ...changes } : current))
     setError('')
     setNotice('')
@@ -385,7 +402,9 @@ function ListeningBookPanel({
           through: draft.through,
           startAt: startAt || 'chapter',
           returnCfi,
-          appearance: draft.appearance ?? defaultListeningAppearance,
+          ...(manualAppearance.current
+            ? { appearance: draft.appearance ?? defaultListeningAppearance }
+            : {}),
         },
         draft.fingerprint,
       )
@@ -394,6 +413,7 @@ function ListeningBookPanel({
         marker: startAt === 'marker' ? draft.marker : saved.marker,
       }
       const sessionId = await createQuietLaunch(bookId, launch)
+      manualAppearance.current = false
       const href = `/listen?book=${encodeURIComponent(
         bookId,
       )}&session=${encodeURIComponent(sessionId)}`
@@ -605,6 +625,10 @@ function ListeningBookPanel({
               changePlan({
                 appearance: {
                   ...(draft.appearance ?? defaultListeningAppearance),
+                  font: undefined,
+                  fontSize: undefined,
+                  lineHeight: undefined,
+                  textWidth: undefined,
                   preset: event.target
                     .value as ListeningAppearanceChoice['preset'],
                   ...(event.target.value === 'reading'

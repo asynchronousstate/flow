@@ -16,6 +16,16 @@ export interface ListeningSection {
   title: string
   html: string
   sourceHref: string
+  spineIndex?: number
+  images?: ListeningImage[]
+}
+
+export interface ListeningImage {
+  id: string
+  path: string
+  mediaType: string
+  label: string
+  caption: string
 }
 
 export interface ListeningBook {
@@ -35,6 +45,7 @@ export interface ListeningPreparationProgress {
 export interface ListeningPreparationOptions {
   onProgress?: (progress: ListeningPreparationProgress) => void
   signal?: AbortSignal
+  includeSourceLocations?: boolean
 }
 
 interface ManifestItem {
@@ -191,6 +202,17 @@ export function listeningText(node: Node): string {
   return normalizedText(readListeningText(node))
 }
 
+export function sourceTextNodes(root: Element): Text[] {
+  const walker = root.ownerDocument.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_CDATA_SECTION,
+  )
+  const nodes: Text[] = []
+  for (let node = walker.nextNode(); node; node = walker.nextNode())
+    nodes.push(node as Text)
+  return nodes
+}
+
 /** Partition source prose into disjoint runs, including text around nested lists.
  * Inline emphasis stays in its paragraph; a blockquote containing paragraphs is
  * not counted a second time. Renderer-added inline highlight spans are harmless.
@@ -258,10 +280,15 @@ function sanitizeChapter(
   item: ManifestItem,
   sectionId: string,
   sectionIds: Map<string, string>,
-): string {
+  imageTypes?: ReadonlyMap<string, string>,
+) {
   const output = document.implementation.createHTMLDocument('')
   const container = output.createElement('div')
   const usedIds = new Set<string>()
+  const images: ListeningImage[] = []
+  const sourceIndices = imageTypes
+    ? new Map(sourceTextNodes(body).map((node, index) => [node, index]))
+    : undefined
   const bodyId = body.getAttribute('id')
   if (bodyId) {
     container.id = sourceId(sectionId, bodyId)
@@ -296,6 +323,9 @@ function sanitizeChapter(
   function copy(node: Node, parent: Node) {
     // XHTML can put readable prose in CDATA as well as ordinary text nodes.
     if (node.nodeType === 3 || node.nodeType === 4) {
+      const index = sourceIndices?.get(node as Text)
+      if (index !== undefined && node.textContent)
+        parent.appendChild(output.createComment(`flow-source-text:${index}`))
       parent.appendChild(output.createTextNode(node.textContent ?? ''))
       return
     }
@@ -311,6 +341,28 @@ function sanitizeChapter(
           source.getAttribute('aria-label') ||
           (tag === 'svg' ? elements(source, 'title')[0]?.textContent : ''),
       )
+      const image = tag === 'svg' ? elements(source, 'image')[0] : source
+      const reference =
+        image?.getAttribute('src') ||
+        image?.getAttribute('href') ||
+        image?.getAttribute('xlink:href')
+      const path = reference && resolveReference(reference, item.path)?.path
+      const mediaType = path && imageTypes?.get(path)
+      if (path && mediaType) {
+        const id = `${sectionId}-image-${images.length}`
+        const caption = normalizedText(
+          source.closest('figure')?.querySelector('figcaption')?.textContent,
+        )
+        images.push({
+          id,
+          path,
+          mediaType,
+          label:
+            description || caption || path.split('/').pop() || 'EPUB image',
+          caption,
+        })
+        parent.appendChild(output.createComment(`flow-source-image:${id}`))
+      }
       if (description) {
         const alt = output.createElement('span')
         alt.className = 'listening-image-description'
@@ -391,7 +443,7 @@ function sanitizeChapter(
   if (direction && ['ltr', 'rtl', 'auto'].includes(direction))
     container.dir = direction
   copyChildren(body, container)
-  return container.outerHTML
+  return { html: container.outerHTML, images }
 }
 
 async function listeningNavigation(zip: JSZip, manifest: ManifestItem[]) {
@@ -450,8 +502,9 @@ export async function prepareListeningBook(
     },
   )
   const spineItems = elements(packageDocument, 'itemref')
-    .filter((item) => item.getAttribute('linear') !== 'no')
-    .map((item) => {
+    .map((item, spineIndex) => ({ item, spineIndex }))
+    .filter(({ item }) => item.getAttribute('linear') !== 'no')
+    .map(({ item, spineIndex }) => {
       const id = item.getAttribute('idref')
       const entry = manifest.find((candidate) => candidate.id === id)
       if (!entry || !entry.path)
@@ -461,11 +514,22 @@ export async function prepareListeningBook(
           `Listening Mode cannot read this chapter format: ${entry.mediaType}.`,
         )
       }
-      return entry
+      return { ...entry, spineIndex }
     })
   if (!spineItems.length)
     throw new Error('This EPUB has no readable chapters in its reading order.')
 
+  const imageTypes = options.includeSourceLocations
+    ? new Map(
+        manifest
+          .filter((item) =>
+            /^image\/(png|jpeg|gif|webp|avif|bmp|svg\+xml)$/.test(
+              item.mediaType,
+            ),
+          )
+          .map((item) => [item.path, item.mediaType]),
+      )
+    : undefined
   const sectionIds = new Map<string, string>()
   spineItems.forEach((item, index) => {
     if (!sectionIds.has(item.path))
@@ -510,11 +574,15 @@ export async function prepareListeningBook(
     const title =
       heading || titles.get(item.path) || `Section ${sections.length + 1}`
     const id = `flow-section-${sections.length}`
+    const sanitized = sanitizeChapter(body, item, id, sectionIds, imageTypes)
     sections.push({
       id,
       title,
       sourceHref: item.path,
-      html: sanitizeChapter(body, item, id, sectionIds),
+      html: sanitized.html,
+      ...(options.includeSourceLocations
+        ? { spineIndex: item.spineIndex, images: sanitized.images }
+        : {}),
     })
   }
 

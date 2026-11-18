@@ -32,8 +32,7 @@ interface ToolbarTool {
   Icon: IconType
 }
 
-// These are the original Flow reader tools. Listening Mode replaces the
-// original Listening destination with Home; it does not introduce another copy.
+// Keep the familiar reader controls scoped to the prepared document.
 export const listeningToolbarTools: readonly ToolbarTool[] = [
   { action: 'toc', label: 'Contents', name: 'Table of contents', Icon: MdToc },
   { action: 'search', label: 'Search', name: 'Search', Icon: MdSearch },
@@ -88,6 +87,7 @@ export function ListeningToolbar({
         key={tool.action}
         type="button"
         className={`flow-toolkit-action flow-toolkit-action-${tool.action}`}
+        data-listening-tool={tool.action}
         aria-label={tool.name}
         title={tool.name}
         aria-pressed={selected}

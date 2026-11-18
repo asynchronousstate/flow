@@ -9,6 +9,7 @@ import Navigation, { NavItem } from '@flow/epubjs/types/navigation'
 import Section from '@flow/epubjs/types/section'
 
 import { AnnotationColor, AnnotationType } from '../annotation'
+import { deleteBookAnnotation, saveBookAnnotation } from '../book-annotations'
 import { BookRecord, db } from '../db'
 import { fileToEpub } from '../file'
 import type { ListeningMarker } from '../listening/integrated'
@@ -233,53 +234,38 @@ export class BookTab extends BaseTab {
     text: string,
     notes?: string,
   ) {
-    const spine = this.section
-    if (!spine?.navitem) return
-
-    const i = this.book.annotations.findIndex((a) => a.cfi === cfi)
-    let annotation = this.book.annotations[i]
-
-    const now = Date.now()
-    if (!annotation) {
-      annotation = {
-        id: uuidv4(),
-        bookId: this.book.id,
+    const spine = this.view?.section ?? this.section
+    if (!spine)
+      return Promise.reject(
+        new Error('Reopen the chapter to save this annotation.'),
+      )
+    const existing = this.book.annotations.find((item) => item.cfi === cfi)
+    const task = saveBookAnnotation(
+      this.book.id,
+      {
         cfi,
         spine: {
-          index: spine.index,
-          title: spine.navitem.label,
+          index: existing?.spine.index ?? spine.index,
+          title:
+            existing?.spine.title ??
+            this.mapSectionToNavItem(spine.href)?.label ??
+            this.book.metadata.title ??
+            this.title,
         },
-        createAt: now,
-        updatedAt: now,
         type,
         color,
         notes,
         text,
-      }
-
-      this.updateBook({
-        // DataCloneError: Failed to execute 'put' on 'IDBObjectStore': #<Object> could not be cloned.
-        annotations: [...snapshot(this.book.annotations), annotation],
-      })
-    } else {
-      annotation = {
-        ...this.book.annotations[i]!,
-        type,
-        updatedAt: now,
-        color,
-        notes,
-        text,
-      }
-      this.book.annotations.splice(i, 1, annotation)
-      this.updateBook({
-        annotations: [...snapshot(this.book.annotations)],
-      })
-    }
+      },
+      existing?.id,
+    )
+    this.trackTask(task)
+    return task
   }
   removeAnnotation(cfi: string) {
-    return this.updateBook({
-      annotations: snapshot(this.book.annotations).filter((a) => a.cfi !== cfi),
-    })
+    const task = deleteBookAnnotation(this.book.id, { cfi })
+    this.trackTask(task)
+    return task
   }
 
   keyword = ''

@@ -1,6 +1,8 @@
 import { RefObject, useEffect, useState } from 'react'
 import { FiBookmark } from 'react-icons/fi'
 
+import type { ListeningAppearance } from './appearance'
+
 export interface BookmarkParagraph {
   sectionId: string
   sourceHref: string
@@ -37,11 +39,13 @@ export default function QuietBookmarks({
   paragraphs,
   saved,
   onBookmark,
+  layout,
 }: {
   host: RefObject<HTMLDivElement>
   paragraphs: BookmarkParagraph[]
   saved?: BookmarkParagraph
   onBookmark: (paragraph: BookmarkParagraph) => void
+  layout?: ListeningAppearance
 }) {
   const [positions, setPositions] = useState<PositionedBookmark[]>([])
 
@@ -116,7 +120,7 @@ export default function QuietBookmarks({
       observer.disconnect()
       window.removeEventListener('resize', schedule)
     }
-  }, [host, paragraphs])
+  }, [host, layout, paragraphs])
 
   return (
     <div className="flow-quiet-bookmarks" role="group" aria-label="Bookmarks">

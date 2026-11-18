@@ -229,6 +229,8 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
   const [annotate, setAnnotate] = useState(!!annotation)
   const [savingStart, setSavingStart] = useState(false)
   const [listeningError, setListeningError] = useState('')
+  const [savingAnnotation, setSavingAnnotation] = useState(false)
+  const [annotationError, setAnnotationError] = useState('')
   const hideRef = useRef(hide)
   hideRef.current = hide
   const dismiss = useCallback(() => hideRef.current(), [])
@@ -304,6 +306,25 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
     // validation errors are displayed above without poisoning the write queue.
     policy?.track(lifecycle)
     return lifecycle
+  }
+
+  async function writeAnnotation(write: () => Promise<unknown>) {
+    if (savingAnnotation) return
+    setSavingAnnotation(true)
+    setAnnotationError('')
+    try {
+      await write()
+      if (mounted.current) dismiss()
+    } catch (error) {
+      if (mounted.current)
+        setAnnotationError(
+          error instanceof Error
+            ? error.message
+            : 'Could not save the annotation.',
+        )
+    } finally {
+      if (mounted.current) setSavingAnnotation(false)
+    }
   }
 
   const position = forward
@@ -443,8 +464,11 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
           {keys(typeMap).map((type) => (
             <div key={type} className="flex gap-2">
               {keys(colorMap).map((color) => (
-                <div
+                <button
+                  type="button"
                   key={color}
+                  aria-label={`Highlight in ${color}`}
+                  disabled={savingAnnotation}
                   style={{
                     [typeMap[type].style]: colorMap[color],
                     width: ANNOTATION_SIZE,
@@ -455,33 +479,33 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
                     'typescale-body-large text-on-surface-variant flex cursor-pointer items-center justify-center',
                     typeMap[type].class,
                   )}
-                  onClick={() => {
-                    tab.putAnnotation(
-                      type,
-                      cfi,
-                      color,
-                      text,
-                      ref.current?.value,
+                  onClick={() =>
+                    writeAnnotation(() =>
+                      tab.putAnnotation(
+                        type,
+                        cfi,
+                        color,
+                        text,
+                        ref.current?.value,
+                      ),
                     )
-                    hide()
-                  }}
+                  }
                 >
                   A
-                </div>
+                </button>
               ))}
             </div>
           ))}
         </div>
+        {annotationError && <p role="alert">{annotationError}</p>}
         {annotate && (
           <div className="mt-3 flex">
             {annotation && (
               <Button
                 compact
                 variant="secondary"
-                onClick={() => {
-                  tab.removeAnnotation(cfi)
-                  hide()
-                }}
+                disabled={savingAnnotation}
+                onClick={() => writeAnnotation(() => tab.removeAnnotation(cfi))}
               >
                 {t('delete')}
               </Button>
@@ -489,16 +513,18 @@ const TextSelectionMenuRenderer: React.FC<TextSelectionMenuRendererProps> = ({
             <Button
               className="ml-auto"
               compact
-              onClick={() => {
-                tab.putAnnotation(
-                  annotation?.type ?? 'highlight',
-                  cfi,
-                  annotation?.color ?? 'yellow',
-                  text,
-                  ref.current?.value,
+              disabled={savingAnnotation}
+              onClick={() =>
+                writeAnnotation(() =>
+                  tab.putAnnotation(
+                    annotation?.type ?? 'highlight',
+                    cfi,
+                    annotation?.color ?? 'yellow',
+                    text,
+                    ref.current?.value,
+                  ),
                 )
-                hide()
-              }}
+              }
             >
               {t(annotation ? 'update' : 'create')}
             </Button>

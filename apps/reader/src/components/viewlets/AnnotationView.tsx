@@ -1,6 +1,5 @@
 import { useBoolean } from '@literal-ui/hooks'
-import React, { Fragment } from 'react'
-import { useMemo } from 'react'
+import React, { Fragment, useMemo, useState } from 'react'
 import { VscCopy } from 'react-icons/vsc'
 
 import { Annotation } from '@flow/reader/annotation'
@@ -148,6 +147,7 @@ interface AnnotationBlockProps {
 }
 const AnnotationBlock: React.FC<AnnotationBlockProps> = ({ annotations }) => {
   const [expanded, toggle] = useBoolean(true)
+  const [error, setError] = useState('')
 
   return (
     <div>
@@ -170,8 +170,17 @@ const AnnotationBlock: React.FC<AnnotationBlockProps> = ({ annotations }) => {
                 onClick={() => {
                   reader.focusedBookTab?.display(a.cfi)
                 }}
-                onDelete={() => {
-                  reader.focusedBookTab?.removeAnnotation(a.cfi)
+                onDelete={async () => {
+                  setError('')
+                  try {
+                    await reader.focusedBookTab?.removeAnnotation(a.cfi)
+                  } catch (problem) {
+                    setError(
+                      problem instanceof Error
+                        ? problem.message
+                        : 'Could not delete the annotation.',
+                    )
+                  }
                 }}
               >
                 {a.text}
@@ -190,6 +199,7 @@ const AnnotationBlock: React.FC<AnnotationBlockProps> = ({ annotations }) => {
           ))}
         </div>
       )}
+      {error && <p role="alert">{error}</p>}
     </div>
   )
 }
